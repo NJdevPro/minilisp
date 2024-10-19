@@ -62,7 +62,7 @@ typedef struct Obj {
     // Object values.
     union {
         // Int
-        int value;
+        long long value;
         // Cell
         struct {
             struct Obj *car;
@@ -328,8 +328,8 @@ static void gc(void *root) {
 // Constructors
 //======================================================================
 
-static Obj *make_int(void *root, int value) {
-    Obj *r = alloc(root, TINT, sizeof(int));
+static Obj *make_int(void *root, long long value) {
+    Obj *r = alloc(root, TINT, sizeof(long long));
     r->value = value;
     return r;
 }
@@ -463,7 +463,7 @@ static Obj *read_quote(void *root) {
     return *tmp;
 }
 
-static int read_number(int val) {
+static long long read_number(int val) {
     while (isdigit(peek()))
         val = val * 10 + (getchar() - '0');
     return val;
@@ -535,7 +535,7 @@ static void print(Obj *obj) {
     case type:                                  \
         printf(__VA_ARGS__);                    \
         return
-    CASE(TINT, "%d", obj->value);
+    CASE(TINT, "%lld", obj->value);
     CASE(TSYMBOL, "%s", obj->name);
     CASE(TPRIMITIVE, "<primitive>");
     CASE(TFUNCTION, "<function>");
@@ -778,13 +778,24 @@ static Obj *prim_gensym(void *root, Obj **env, Obj **list) {
 
 // (+ <integer> ...)
 static Obj *prim_plus(void *root, Obj **env, Obj **list) {
-    int sum = 0;
+    long long sum = 0;
     for (Obj *args = eval_list(root, env, list); args != Nil; args = args->cdr) {
         if (args->car->type != TINT)
             error("+ takes only numbers");
         sum += args->car->value;
     }
     return make_int(root, sum);
+}
+
+// (* <integer> ...)
+static Obj *prim_mult(void *root, Obj **env, Obj **list) {
+    long long prod = 1;
+    for (Obj *args = eval_list(root, env, list); args != Nil; args = args->cdr) {
+        if (args->car->type != TINT)
+            error("* takes only numbers");
+        prod *= args->car->value;
+    }
+    return make_int(root, prod);
 }
 
 // (- <integer> ...)
@@ -795,7 +806,7 @@ static Obj *prim_minus(void *root, Obj **env, Obj **list) {
             error("- takes only numbers");
     if (args->cdr == Nil)
         return make_int(root, -args->car->value);
-    int r = args->car->value;
+    long long r = args->car->value;
     for (Obj *p = args->cdr; p != Nil; p = p->cdr)
         r -= p->car->value;
     return make_int(root, r);
@@ -943,6 +954,7 @@ static void define_primitives(void *root, Obj **env) {
     add_primitive(root, env, "gensym", prim_gensym);
     add_primitive(root, env, "+", prim_plus);
     add_primitive(root, env, "-", prim_minus);
+    add_primitive(root, env, "*", prim_mult);
     add_primitive(root, env, "<", prim_lt);
     add_primitive(root, env, "define", prim_define);
     add_primitive(root, env, "defun", prim_defun);
