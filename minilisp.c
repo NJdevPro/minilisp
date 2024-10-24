@@ -597,7 +597,7 @@ static Obj *prim_not(void *root, Obj **env, Obj **list) {
 
 // (and ...)
 static Obj *prim_and(void *root, Obj **env, Obj **list) {
-    Obj *car = True;  // Par défaut, `and` retourne True s'il n'y a pas d'arguments
+    Obj *car = True;  // by default, return True if no args
     for (Obj *args = eval_list(root, env, list); args != Nil; args = args->cdr) {
         car = eval(root, env, &args->car);
         if (car == Nil) break;

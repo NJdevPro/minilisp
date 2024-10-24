@@ -36,8 +36,8 @@
 ;; => e1
 (defmacro and (expr . rest)
   (if rest
-      (list 'if expr (cons 'and rest))
-    expr))
+      (list 'if expr (cons 'and rest)) 
+      expr))
 
 ;; (or e1 e2 ...)
 ;; => (let1 <tmp> e1

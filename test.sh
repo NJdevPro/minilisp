@@ -97,6 +97,10 @@ run cdr "(b c)" "(cdr '(a b c))"
 
 run setcar "(x . b)" "(define obj (cons 'a 'b)) (setcar obj 'x) obj"
 
+run length 0 "(length '())"
+run length 2 "(length '(()()))"
+run length 3 "(length '(1 () 3))"
+
 # Comments
 run comment 5 "
   ; 2
