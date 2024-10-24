@@ -2,327 +2,14 @@
 
 #include <assert.h>
 #include <ctype.h>
-#include <stdarg.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/mman.h>
-
-static __attribute((noreturn)) void error(char *fmt, ...) {
-    va_list ap;
-    va_start(ap, fmt);
-    vfprintf(stderr, fmt, ap);
-    fprintf(stderr, "\n");
-    va_end(ap);
-    exit(1);
-}
-
-//======================================================================
-// Lisp objects
-//======================================================================
-
-// The Lisp object type
-enum {
-    // Regular objects visible from the user
-    TINT = 1,
-    TCELL,
-    TSYMBOL,
-    TPRIMITIVE,
-    TFUNCTION,
-    TMACRO,
-    TENV,
-    // The marker that indicates the object has been moved to other location by GC. The new location
-    // can be found at the forwarding pointer. Only the functions to do garbage collection set and
-    // handle the object of this type. Other functions will never see the object of this type.
-    TMOVED,
-    // Const objects. They are statically allocated and will never be managed by GC.
-    TTRUE,
-    TNIL,
-    TDOT,
-    TCPAREN,
-};
-
-// Typedef for the primitive function
-struct Obj;
-typedef struct Obj *Primitive(void *root, struct Obj **env, struct Obj **args);
-
-// The object type
-typedef struct Obj {
-    // The first word of the object represents the type of the object. Any code that handles object
-    // needs to check its type first, then access the following union members.
-    int type;
-
-    // The total size of the object, including "type" field, this field, the contents, and the
-    // padding at the end of the object.
-    int size;
-
-    // Object values.
-    union {
-        // Int
-        long long value;
-        // Cell
-        struct {
-            struct Obj *car;
-            struct Obj *cdr;
-        };
-        // Symbol
-        char name[1];
-        // Primitive
-        Primitive *fn;
-        // Function or Macro
-        struct {
-            struct Obj *params;
-            struct Obj *body;
-            struct Obj *env;
-        };
-        // Environment frame. This is a linked list of association lists
-        // containing the mapping from symbols to their value.
-        struct {
-            struct Obj *vars;
-            struct Obj *up;
-        };
-        // Forwarding pointer
-        void *moved;
-    };
-} Obj;
-
-// Constants
-static Obj *True = &(Obj){ TTRUE };
-static Obj *Nil = &(Obj){ TNIL };
-static Obj *Dot = &(Obj){ TDOT };
-static Obj *Cparen = &(Obj){ TCPAREN };
-
-// The list containing all symbols. Such data structure is traditionally called the "obarray", but I
-// avoid using it as a variable name as this is not an array but a list.
-static Obj *Symbols;
-
-//======================================================================
-// Memory management
-//======================================================================
-
-// The size of the heap in byte
-#define MEMORY_SIZE 65536
-
-// The pointer pointing to the beginning of the current heap
-static void *memory;
-
-// The pointer pointing to the beginning of the old heap
-static void *from_space;
-
-// The number of bytes allocated from the heap
-static size_t mem_nused = 0;
-
-// Flags to debug GC
-static bool gc_running = false;
-static bool debug_gc = false;
-static bool always_gc = false;
-
-static void gc(void *root);
-
-// Currently we are using Cheney's copying GC algorithm, with which the available memory is split
-// into two halves and all objects are moved from one half to another every time GC is invoked. That
-// means the address of the object keeps changing. If you take the address of an object and keep it
-// in a C variable, dereferencing it could cause SEGV because the address becomes invalid after GC
-// runs.
-//
-// In order to deal with that, all access from C to Lisp objects will go through two levels of
-// pointer dereferences. The C local variable is pointing to a pointer on the C stack, and the
-// pointer is pointing to the Lisp object. GC is aware of the pointers in the stack and updates
-// their contents with the objects' new addresses when GC happens.
-//
-// The following is a macro to reserve the area in the C stack for the pointers. The contents of
-// this area are considered to be GC root.
-//
-// Be careful not to bypass the two levels of pointer indirections. If you create a direct pointer
-// to an object, it'll cause a subtle bug. Such code would work in most cases but fails with SEGV if
-// GC happens during the execution of the code. Any code that allocates memory may invoke GC.
-
-#define ROOT_END ((void *)-1)
-
-#define ADD_ROOT(size)                          \
-    void *root_ADD_ROOT_[size + 2];             \
-    root_ADD_ROOT_[0] = root;                   \
-    for (int i = 1; i <= size; i++)             \
-        root_ADD_ROOT_[i] = NULL;               \
-    root_ADD_ROOT_[size + 1] = ROOT_END;        \
-    root = root_ADD_ROOT_
-
-#define DEFINE1(var1)                           \
-    ADD_ROOT(1);                                \
-    Obj **var1 = (Obj **)(root_ADD_ROOT_ + 1)
-
-#define DEFINE2(var1, var2)                     \
-    ADD_ROOT(2);                                \
-    Obj **var1 = (Obj **)(root_ADD_ROOT_ + 1);  \
-    Obj **var2 = (Obj **)(root_ADD_ROOT_ + 2)
-
-#define DEFINE3(var1, var2, var3)               \
-    ADD_ROOT(3);                                \
-    Obj **var1 = (Obj **)(root_ADD_ROOT_ + 1);  \
-    Obj **var2 = (Obj **)(root_ADD_ROOT_ + 2);  \
-    Obj **var3 = (Obj **)(root_ADD_ROOT_ + 3)
-
-#define DEFINE4(var1, var2, var3, var4)         \
-    ADD_ROOT(4);                                \
-    Obj **var1 = (Obj **)(root_ADD_ROOT_ + 1);  \
-    Obj **var2 = (Obj **)(root_ADD_ROOT_ + 2);  \
-    Obj **var3 = (Obj **)(root_ADD_ROOT_ + 3);  \
-    Obj **var4 = (Obj **)(root_ADD_ROOT_ + 4)
-
-// Round up the given value to a multiple of size. Size must be a power of 2. It adds size - 1
-// first, then zero-ing the least significant bits to make the result a multiple of size. I know
-// these bit operations may look a little bit tricky, but it's efficient and thus frequently used.
-static inline size_t roundup(size_t var, size_t size) {
-    return (var + size - 1) & ~(size - 1);
-}
-
-// Allocates memory block. This may start GC if we don't have enough memory.
-static Obj *alloc(void *root, int type, size_t size) {
-    // The object must be large enough to contain a pointer for the forwarding pointer. Make it
-    // larger if it's smaller than that.
-    size = roundup(size, sizeof(void *));
-
-    // Add the size of the type tag and size fields.
-    size += offsetof(Obj, value);
-
-    // Round up the object size to the nearest alignment boundary, so that the next object will be
-    // allocated at the proper alignment boundary. Currently we align the object at the same
-    // boundary as the pointer.
-    size = roundup(size, sizeof(void *));
-
-    // If the debug flag is on, allocate a new memory space to force all the existing objects to
-    // move to new addresses, to invalidate the old addresses. By doing this the GC behavior becomes
-    // more predictable and repeatable. If there's a memory bug that the C variable has a direct
-    // reference to a Lisp object, the pointer will become invalid by this GC call. Dereferencing
-    // that will immediately cause SEGV.
-    if (always_gc && !gc_running)
-        gc(root);
-
-    // Otherwise, run GC only when the available memory is not large enough.
-    if (!always_gc && MEMORY_SIZE < mem_nused + size)
-        gc(root);
-
-    // Terminate the program if we couldn't satisfy the memory request. This can happen if the
-    // requested size was too large or the from-space was filled with too many live objects.
-    if (MEMORY_SIZE < mem_nused + size)
-        error("Memory exhausted");
-
-    // Allocate the object.
-    Obj *obj = memory + mem_nused;
-    obj->type = type;
-    obj->size = size;
-    mem_nused += size;
-    return obj;
-}
-
-//======================================================================
-// Garbage collector
-//======================================================================
-
-// Cheney's algorithm uses two pointers to keep track of GC status. At first both pointers point to
-// the beginning of the to-space. As GC progresses, they are moved towards the end of the
-// to-space. The objects before "scan1" are the objects that are fully copied. The objects between
-// "scan1" and "scan2" have already been copied, but may contain pointers to the from-space. "scan2"
-// points to the beginning of the free space.
-static Obj *scan1;
-static Obj *scan2;
-
-// Moves one object from the from-space to the to-space. Returns the object's new address. If the
-// object has already been moved, does nothing but just returns the new address.
-static inline Obj *forward(Obj *obj) {
-    // If the object's address is not in the from-space, the object is not managed by GC nor it
-    // has already been moved to the to-space.
-    ptrdiff_t offset = (uint8_t *)obj - (uint8_t *)from_space;
-    if (offset < 0 || MEMORY_SIZE <= offset)
-        return obj;
-
-    // The pointer is pointing to the from-space, but the object there was a tombstone. Follow the
-    // forwarding pointer to find the new location of the object.
-    if (obj->type == TMOVED)
-        return obj->moved;
-
-    // Otherwise, the object has not been moved yet. Move it.
-    Obj *newloc = scan2;
-    memcpy(newloc, obj, obj->size);
-    scan2 = (Obj *)((uint8_t *)scan2 + obj->size);
-
-    // Put a tombstone at the location where the object used to occupy, so that the following call
-    // of forward() can find the object's new location.
-    obj->type = TMOVED;
-    obj->moved = newloc;
-    return newloc;
-}
-
-static void *alloc_semispace() {
-    return mmap(NULL, MEMORY_SIZE, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
-}
-
-// Copies the root objects.
-static void forward_root_objects(void *root) {
-    Symbols = forward(Symbols);
-    for (void **frame = root; frame; frame = *(void ***)frame)
-        for (int i = 1; frame[i] != ROOT_END; i++)
-            if (frame[i])
-                frame[i] = forward(frame[i]);
-}
-
-// Implements Cheney's copying garbage collection algorithm.
-// http://en.wikipedia.org/wiki/Cheney%27s_algorithm
-static void gc(void *root) {
-    assert(!gc_running);
-    gc_running = true;
-
-    // Allocate a new semi-space.
-    from_space = memory;
-    memory = alloc_semispace();
-
-    // Initialize the two pointers for GC. Initially they point to the beginning of the to-space.
-    scan1 = scan2 = memory;
-
-    // Copy the GC root objects first. This moves the pointer scan2.
-    forward_root_objects(root);
-
-    // Copy the objects referenced by the GC root objects located between scan1 and scan2. Once it's
-    // finished, all live objects (i.e. objects reachable from the root) will have been copied to
-    // the to-space.
-    while (scan1 < scan2) {
-        switch (scan1->type) {
-        case TINT:
-        case TSYMBOL:
-        case TPRIMITIVE:
-            // Any of the above types does not contain a pointer to a GC-managed object.
-            break;
-        case TCELL:
-            scan1->car = forward(scan1->car);
-            scan1->cdr = forward(scan1->cdr);
-            break;
-        case TFUNCTION:
-        case TMACRO:
-            scan1->params = forward(scan1->params);
-            scan1->body = forward(scan1->body);
-            scan1->env = forward(scan1->env);
-            break;
-        case TENV:
-            scan1->vars = forward(scan1->vars);
-            scan1->up = forward(scan1->up);
-            break;
-        default:
-            error("Bug: copy: unknown type %d", scan1->type);
-        }
-        scan1 = (Obj *)((uint8_t *)scan1 + scan1->size);
-    }
-
-    // Finish up GC.
-    munmap(from_space, MEMORY_SIZE);
-    size_t old_nused = mem_nused;
-    mem_nused = (size_t)((uint8_t *)scan1 - (uint8_t *)memory);
-    if (debug_gc)
-        fprintf(stderr, "GC: %zu bytes out of %zu bytes copied.\n", mem_nused, old_nused);
-    gc_running = false;
-}
+#include "minilisp.h"
+#include "gc.c"
 
 //======================================================================
 // Constructors
@@ -776,6 +463,22 @@ static Obj *prim_gensym(void *root, Obj **env, Obj **list) {
   return make_symbol(root, buf);
 }
 
+// (length ...)
+static Obj *prim_length(void *root, Obj **env, Obj **list) {
+    Obj *args = eval_list(root, env, list);
+    if (length(args) != 1)
+        error("length takes 1 argument");
+    Obj *lst = args->car;
+    
+    if (lst != Nil && lst->type != TCELL)
+        error("Argument to length must be a list");
+
+    int len = 0;
+    for (; lst != Nil && lst->type == TCELL; lst = lst->cdr) 
+        len++;
+    return make_int(root, len);
+}
+
 // (+ <integer> ...)
 static Obj *prim_plus(void *root, Obj **env, Obj **list) {
     long long sum = 0;
@@ -796,6 +499,30 @@ static Obj *prim_mult(void *root, Obj **env, Obj **list) {
         prod *= args->car->value;
     }
     return make_int(root, prod);
+}
+
+// (/ <integer> ...)
+static Obj *prim_div(void *root, Obj **env, Obj **list) {
+    Obj *args = eval_list(root, env, list);
+    long long r = args->car->value;
+    for (Obj *p = args->cdr; p != Nil; p = p->cdr){
+        if (p->car->type != TINT)
+            error("/ takes only numbers");
+        r /= p->car->value;
+    }
+    return make_int(root, r);
+}
+
+// (% <integer> ...)
+static Obj *prim_modulo(void *root, Obj **env, Obj **list) {
+    Obj *args = eval_list(root, env, list);
+    long long r = args->car->value;
+    for (Obj *p = args->cdr; p != Nil; p = p->cdr){
+        if (p->car->type != TINT)
+            error("mod takes only numbers");
+        r %= p->car->value;
+    }
+    return make_int(root, r);
 }
 
 // (- <integer> ...)
@@ -820,8 +547,76 @@ static Obj *prim_lt(void *root, Obj **env, Obj **list) {
     Obj *x = args->car;
     Obj *y = args->cdr->car;
     if (x->type != TINT || y->type != TINT)
-        error("< takes only numbers");
+        error("< takes only 2 numbers");
     return x->value < y->value ? True : Nil;
+}
+
+// (> <integer> <integer>)
+static Obj *prim_gt(void *root, Obj **env, Obj **list) {
+    Obj *args = eval_list(root, env, list);
+    if (length(args) != 2)
+        error("malformed >");
+    Obj *x = args->car;
+    Obj *y = args->cdr->car;
+    if (x->type != TINT || y->type != TINT)
+        error("> takes only 2 numbers");
+    return x->value > y->value ? True : Nil;
+}
+
+// (<= <integer> <integer>)
+static Obj *prim_lte(void *root, Obj **env, Obj **list) {
+    Obj *args = eval_list(root, env, list);
+    if (length(args) != 2)
+        error("malformed <=");
+    Obj *x = args->car;
+    Obj *y = args->cdr->car;
+    if (x->type != TINT || y->type != TINT)
+        error("<= takes only 2 numbers");
+    return x->value <= y->value ? True : Nil;
+}
+
+// (>= <integer> <integer>)
+static Obj *prim_gte(void *root, Obj **env, Obj **list) {
+    Obj *args = eval_list(root, env, list);
+    if (length(args) != 2)
+        error("malformed >=");
+    Obj *x = args->car;
+    Obj *y = args->cdr->car;
+    if (x->type != TINT || y->type != TINT)
+        error(">= takes only 2 numbers");
+    return x->value >= y->value ? True : Nil;
+}
+
+// (not ...)
+static Obj *prim_not(void *root, Obj **env, Obj **list) {
+    if (length(*list) != 1)
+        error("not accepts 1 argument");
+    Obj *values = eval_list(root, env, list);
+    return values->car == Nil ? True : Nil;
+}
+
+// (and ...)
+static Obj *prim_and(void *root, Obj **env, Obj **list) {
+    Obj *car = True;  // Par défaut, `and` retourne True s'il n'y a pas d'arguments
+    for (Obj *args = eval_list(root, env, list); args != Nil; args = args->cdr) {
+        car = eval(root, env, &args->car);
+        if (car == Nil) break;
+    }
+    return car;
+}
+
+// (or ...)
+static Obj *prim_or(void *root, Obj **env, Obj **list) {
+    Obj *car = Nil;
+    for (Obj *args = eval_list(root, env, list); args != Nil; args = args->cdr) {
+        car = eval(root, env, &args->car);
+        if (car != Nil) break;
+    }
+    return car;
+}
+
+static Obj *prim_exit(void *root, Obj **env, Obj **list) {
+    exit(0);
 }
 
 static Obj *handle_function(void *root, Obj **env, Obj **list, int type) {
@@ -952,10 +747,19 @@ static void define_primitives(void *root, Obj **env) {
     add_primitive(root, env, "setcar", prim_setcar);
     add_primitive(root, env, "while", prim_while);
     add_primitive(root, env, "gensym", prim_gensym);
+    add_primitive(root, env, "length", prim_length);
     add_primitive(root, env, "+", prim_plus);
     add_primitive(root, env, "-", prim_minus);
     add_primitive(root, env, "*", prim_mult);
+    add_primitive(root, env, "/", prim_div);
+    add_primitive(root, env, "mod", prim_modulo);
     add_primitive(root, env, "<", prim_lt);
+    add_primitive(root, env, ">", prim_gt);
+    add_primitive(root, env, "<=", prim_lte);
+    add_primitive(root, env, ">=", prim_gte);
+    add_primitive(root, env, "not", prim_not);
+    add_primitive(root, env, "and", prim_and);
+    add_primitive(root, env, "or", prim_or);
     add_primitive(root, env, "define", prim_define);
     add_primitive(root, env, "defun", prim_defun);
     add_primitive(root, env, "defmacro", prim_defmacro);
@@ -965,6 +769,7 @@ static void define_primitives(void *root, Obj **env) {
     add_primitive(root, env, "=", prim_num_eq);
     add_primitive(root, env, "eq", prim_eq);
     add_primitive(root, env, "println", prim_println);
+    add_primitive(root, env, "exit", prim_exit);
 }
 
 //======================================================================
