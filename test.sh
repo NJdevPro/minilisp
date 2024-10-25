@@ -38,6 +38,11 @@ run quote '(+ 1 2)' "'(+ 1 2)"
 
 run + 3 '(+ 1 2)'
 run + -2 '(+ 1 -3)'
+run '*' 24 '(* 1 2 3 4)'
+run '*' -24 '(* -1 2 3 4)'
+run '/' 6 '(/ 13 2)'
+run 'mod' 1 '(mod 5 2)'
+run 'mod' 0 '(mod 4 2)'
 
 run 'unary -' -3 '(- 3)'
 run '-' -2 '(- 3 5)'
@@ -46,6 +51,39 @@ run '-' -9 '(- 3 5 7)'
 run '<' t '(< 2 3)'
 run '<' '()' '(< 3 3)'
 run '<' '()' '(< 4 3)'
+
+run '>' t '(> 3 2)'
+run '>' t '(> 3 -1)'
+run '>' '()' '(> 3 3)'
+run '>' '()' '(> 2 3)'
+run '>' 't' '(> 4 3)'
+
+run '>=' 't' '(>= 3 2)'
+run '>=' 't' '(>= 3 -1)'
+run '>=' 't' '(>= 3 3)'
+run '>=' '()' '(>= 2 3)'
+run '>=' 't' '(>= 4 3)'
+
+run '<=' '()' '(<= 3 2)'
+run '<=' '()' '(<= 3 -1)'
+run '<=' 't' '(<= 3 3)'
+run '<=' 't' '(<= 2 3)'
+run '<=' '()' '(<= 4 3)'
+
+run 'not' '()' '(not t)'
+run 'not' '()' '(not 1)'
+run 'not' 't' '(not ())'
+
+run 'and' 't' '(and)'
+run 'and' '2' '(and 1 2)'
+run 'and' '()' '(and 1 ())'
+run 'and' '()' '(and () ())'
+run 'and' '()' '(and 1 () 2)'
+
+run 'or' '()' '(or)'
+run 'or' '1' '(or 1 2)'
+run 'or' '2' '(or () 2)'
+run 'or' '()' '(or () ())'
 
 run 'literal list' '(a b c)' "'(a b c)"
 run 'literal list' '(a b . c)' "'(a b . c)"
@@ -58,6 +96,10 @@ run car a "(car '(a b c))"
 run cdr "(b c)" "(cdr '(a b c))"
 
 run setcar "(x . b)" "(define obj (cons 'a 'b)) (setcar obj 'x) obj"
+
+run length 0 "(length '())"
+run length 2 "(length '(()()))"
+run length 3 "(length '(1 () 3))"
 
 # Comments
 run comment 5 "

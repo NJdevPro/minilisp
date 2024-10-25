@@ -20,11 +20,9 @@
 (defmacro progn (expr . rest)
   (list (cons 'lambda (cons () (cons expr rest)))))
 
-(defun list (x . y)
-  (cons x y))
+(defun list (x . y) (cons x y))
 
-(defun not (x)
-  (if x () t))
+;(defun not (x) (if x () t))
 
 ;; (let1 var val body ...)
 ;; => ((lambda (var) body ...) val)
@@ -38,8 +36,8 @@
 ;; => e1
 (defmacro and (expr . rest)
   (if rest
-      (list 'if expr (cons 'and rest))
-    expr))
+      (list 'if expr (cons 'and rest)) 
+      expr))
 
 ;; (or e1 e2 ...)
 ;; => (let1 <tmp> e1
@@ -70,9 +68,9 @@
 ;;; Numeric operators
 ;;;
 
-(defun <= (e1 e2)
-  (or (< e1 e2)
-      (= e1 e2)))
+;(defun <= (e1 e2)
+;  (or (< e1 e2)
+;      (= e1 e2)))
 
 ;;;
 ;;; List operators
