@@ -25,13 +25,24 @@ int main() {
 #endif
 
 
+int ends_with(const char *str, const char *suffix)
+{
+    if (!str || !suffix)
+        return 0;
+    size_t lenstr = strlen(str);
+    size_t lensuffix = strlen(suffix);
+    if (lensuffix >  lenstr) 
+        return 0;
+    return strncmp(str + lenstr - lensuffix, suffix, lensuffix) == 0;
+}
+
 void completion(const char *buf, int pos, bestlineCompletions *lc) {
     (void) pos;
-    if (buf[pos] == '(') {
-        bestlineAddCompletion(lc,")");
+    if (ends_with(buf, "(")) {
+        bestlineAddCompletion(lc,"()");
     }
-    if (!strcmp(buf,"pr")) {
-        bestlineAddCompletion(lc,"intln");
+    if (ends_with(buf, "pr")) {
+        bestlineAddCompletion(lc,"println");
     }
 }
 
@@ -83,10 +94,11 @@ void minilisp() {
         
         if (line[0] != '\0' && line[0] != '/') {
             DEFINE1(expr);
-            eval_input(line, env, expr);
-
-            bestlineHistoryAdd(line); /* Add to the history. */
-            bestlineHistorySave("history.txt"); /* Save the history on disk. */
+            int ok = eval_input(line, env, expr);
+            if (ok == 0) {
+                bestlineHistoryAdd(line); /* Add to the history. */
+                bestlineHistorySave("history.txt"); /* Save the history on disk. */
+            }
         } else if (!strncmp(line, "/balance", 8)) {
             bestlineBalanceMode(1);
         } else if (!strncmp(line, "/unbalance", 10)) {
@@ -104,7 +116,21 @@ void minilisp() {
     }
 }
 
+__attribute((noreturn)) void error(char *fmt, ...);
+
 int main(int argc, char **argv) {
+
+    if (argc > 1){
+        FILE *file;
+        file = fopen(argv[1], "r");
+        if (file) {
+            char c;
+            while ((c = getc(file)) != EOF)
+                putchar(c);
+            fclose(file);
+        }
+        else error("Failed to open file ", argv[1]);
+    }
 
     /* Set the completion callback. This will be called every time the
      * user uses the <tab> key. */

@@ -77,6 +77,6 @@ typedef struct Obj {
 
 
 void init_minilisp(Obj **env);
-void eval_input(char *input, Obj **env, Obj **expr);
+int eval_input(char *input, Obj **env, Obj **expr);
 
 #endif // _MINILISP_H_
