@@ -154,13 +154,13 @@ run closure 3 '(defun call (f) ((lambda (var) (f)) 5))
   ((lambda (var) (call (lambda () var))) 3)'
 
 run counter 3 '
-  (define counter
-    ((lambda (val)
-       (lambda () (setq val (+ val 1)) val))
-     0))
-  (counter)
-  (counter)
-  (counter)'
+(define counter
+  ((lambda (val)
+      (lambda () (setq val (+ val 1)) val))
+    0))
+(counter)
+(counter)
+(counter)'
 
 # While loop
 run while 45 "

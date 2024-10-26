@@ -3,16 +3,8 @@
 
 #include <stdio.h>
 #include <stdarg.h>
+#include <stdlib.h>
 
-
-static __attribute((noreturn)) void error(char *fmt, ...) {
-    va_list ap;
-    va_start(ap, fmt);
-    vfprintf(stderr, fmt, ap);
-    fprintf(stderr, "\n");
-    va_end(ap);
-    exit(1);
-}
 
 //======================================================================
 // Lisp objects
@@ -83,14 +75,8 @@ typedef struct Obj {
     };
 } Obj;
 
-// Constants
-static Obj *True = &(Obj){ TTRUE };
-static Obj *Nil = &(Obj){ TNIL };
-static Obj *Dot = &(Obj){ TDOT };
-static Obj *Cparen = &(Obj){ TCPAREN };
 
-// The list containing all symbols. Such data structure is traditionally called the "obarray", but I
-// avoid using it as a variable name as this is not an array but a list.
-static Obj *Symbols;
+void init_minilisp(Obj **env);
+void eval_input(char *input, Obj **env, Obj **expr);
 
 #endif // _MINILISP_H_

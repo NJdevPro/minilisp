@@ -1,19 +1,15 @@
+#include <assert.h>
 #include <stdio.h>
-#include <stdbool.h>
 #include <stddef.h>
+#include <string.h>
 #include <stdint.h>
 #include <sys/mman.h>
-#include "minilisp.h"
+#include "gc.h"
 
-//======================================================================
-// Memory management
-//======================================================================
-
-// The size of the heap in byte
-#define MEMORY_SIZE 65536
+extern __attribute((noreturn)) void error(char *fmt, ...);
 
 // The pointer pointing to the beginning of the current heap
-static void *memory;
+void *memory;
 
 // The pointer pointing to the beginning of the old heap
 static void *from_space;
@@ -26,58 +22,12 @@ static bool gc_running = false;
 static bool debug_gc = false;
 static bool always_gc = false;
 
-static void gc(void *root);
 
-// Currently we are using Cheney's copying GC algorithm, with which the available memory is split
-// into two halves and all objects are moved from one half to another every time GC is invoked. That
-// means the address of the object keeps changing. If you take the address of an object and keep it
-// in a C variable, dereferencing it could cause SEGV because the address becomes invalid after GC
-// runs.
-//
-// In order to deal with that, all access from C to Lisp objects will go through two levels of
-// pointer dereferences. The C local variable is pointing to a pointer on the C stack, and the
-// pointer is pointing to the Lisp object. GC is aware of the pointers in the stack and updates
-// their contents with the objects' new addresses when GC happens.
-//
-// The following is a macro to reserve the area in the C stack for the pointers. The contents of
-// this area are considered to be GC root.
-//
-// Be careful not to bypass the two levels of pointer indirections. If you create a direct pointer
-// to an object, it'll cause a subtle bug. Such code would work in most cases but fails with SEGV if
-// GC happens during the execution of the code. Any code that allocates memory may invoke GC.
+// The list containing all symbols. Such data structure is traditionally called the "obarray", but I
+// avoid using it as a variable name as this is not an array but a list.
+extern Obj *Symbols;
 
-#define ROOT_END ((void *)-1)
-
-// 初始化 frame (env) 陣列
-#define ADD_ROOT(size)                          \
-    void *root_ADD_ROOT_[size + 2];             \
-    root_ADD_ROOT_[0] = root;                   \
-    for (int i = 1; i <= size; i++)             \
-        root_ADD_ROOT_[i] = NULL;               \
-    root_ADD_ROOT_[size + 1] = ROOT_END;        \
-    root = root_ADD_ROOT_
-// 新增 1 個變數物件
-#define DEFINE1(var1)                           \
-    ADD_ROOT(1);                                \
-    Obj **var1 = (Obj **)(root_ADD_ROOT_ + 1)
-// 新增 2 個變數物件
-#define DEFINE2(var1, var2)                     \
-    ADD_ROOT(2);                                \
-    Obj **var1 = (Obj **)(root_ADD_ROOT_ + 1);  \
-    Obj **var2 = (Obj **)(root_ADD_ROOT_ + 2)
-// 新增 3 個變數物件
-#define DEFINE3(var1, var2, var3)               \
-    ADD_ROOT(3);                                \
-    Obj **var1 = (Obj **)(root_ADD_ROOT_ + 1);  \
-    Obj **var2 = (Obj **)(root_ADD_ROOT_ + 2);  \
-    Obj **var3 = (Obj **)(root_ADD_ROOT_ + 3)
-// 新增 4 個變數物件
-#define DEFINE4(var1, var2, var3, var4)         \
-    ADD_ROOT(4);                                \
-    Obj **var1 = (Obj **)(root_ADD_ROOT_ + 1);  \
-    Obj **var2 = (Obj **)(root_ADD_ROOT_ + 2);  \
-    Obj **var3 = (Obj **)(root_ADD_ROOT_ + 3);  \
-    Obj **var4 = (Obj **)(root_ADD_ROOT_ + 4)
+static void gc(void *root); // forward decl
 
 // Round up the given value to a multiple of size. Size must be a power of 2. It adds size - 1
 // first, then zero-ing the least significant bits to make the result a multiple of size. I know
@@ -87,7 +37,7 @@ static inline size_t roundup(size_t var, size_t size) {
 }
 
 // Allocates memory block. This may start GC if we don't have enough memory.
-static Obj *alloc(void *root, int type, size_t size) { // 分配比 size 大的記憶體給 type 的物件
+Obj *alloc(void *root, int type, size_t size) { // 分配比 size 大的記憶體給 type 的物件
     // The object must be large enough to contain a pointer for the forwarding pointer. Make it
     // larger if it's smaller than that.
     size = roundup(size, sizeof(void *));
@@ -163,7 +113,7 @@ static inline Obj *forward(Obj *obj) { // 將 obj 從 from 區移到 to 區
     return newloc;       // 傳回該物件的新位址
 }
 
-static void *alloc_semispace() {
+void *alloc_semispace() {
     return mmap(NULL, MEMORY_SIZE, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
 }
 
@@ -176,12 +126,23 @@ static void forward_root_objects(void *root) {
                 frame[i] = forward(frame[i]);
 }
 
+
+// Returns true if the environment variable is defined and not the empty string.
+static bool getEnvFlag(char *name) {
+    char *val = getenv(name);
+    return val && val[0];
+}
+
 // Implements Cheney's copying garbage collection algorithm.
 // http://en.wikipedia.org/wiki/Cheney%27s_algorithm
 static void gc(void *root) {
     assert(!gc_running);
     gc_running = true; // 開始垃圾蒐集
 
+    // Debug flags
+    debug_gc = getEnvFlag("MINILISP_DEBUG_GC");
+    always_gc = getEnvFlag("MINILISP_ALWAYS_GC");
+    
     // Allocate a new semi-space.
     from_space = memory;
     memory = alloc_semispace();
