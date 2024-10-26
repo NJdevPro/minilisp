@@ -2,14 +2,14 @@ MiniLisp with REPL
 ==================
 
 Foreword by N. Janin:
-This is my attempt at making rui314' MiniLisp slightly more user friendly.
+This is my attempt at making Rui Ueyama (rui314)'s MiniLisp slightly more user friendly.
 Not being limited by the 1000 lines challenge, I've added a few basic primitives 
 to the original program, while trying to keep the goal of simplicity and conciseness.
 Namely operators >, >=, <=, or, and, not, and function length.
 This has the side effect of being faster as well, since these primitives are compiled 
 instead of being interpreted.
 
-Among the bells and whistles, I've added a REPL based on jart's bestline.
+Among the bells and whistles, I've added a REPL based on Justine Tunney (jart)'s bestline.
 
 ## Shortcuts
 
