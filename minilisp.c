@@ -9,11 +9,35 @@
 #include <stdlib.h>
 #include <string.h>
 #include "minilisp.h"
-#include "gc.c"
+#include "gc.h"
+
+__attribute((noreturn)) void error(char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    vfprintf(stderr, fmt, ap);
+    fprintf(stderr, "\n");
+    va_end(ap);
+    exit(1);
+}
+
+// Constants
+static Obj *True = &(Obj){ TTRUE };
+static Obj *Nil = &(Obj){ TNIL };
+static Obj *Dot = &(Obj){ TDOT };
+static Obj *Cparen = &(Obj){ TCPAREN };
 
 //======================================================================
 // Constructors
 //======================================================================
+
+
+// The list containing all symbols. Such data structure is traditionally called the "obarray", but I
+// avoid using it as a variable name as this is not an array but a list.
+Obj *Symbols;
+
+void *root;    // root of memory
+
+extern Obj *alloc(void *root, int type, size_t size);
 
 static Obj *make_int(void *root, long long value) {
     Obj *r = alloc(root, TINT, sizeof(long long));
@@ -202,35 +226,39 @@ static Obj *read_expr(void *root) {
 static void print(Obj *obj) {
     switch (obj->type) {
     case TCELL:
-        printf("(");
+        puts("(");
         for (;;) {
             print(obj->car);
             if (obj->cdr == Nil)
                 break;
             if (obj->cdr->type != TCELL) {
-                printf(" . ");
+                puts(" . ");
                 print(obj->cdr);
                 break;
             }
-            printf(" ");
+            puts(" ");
             obj = obj->cdr;
         }
-        printf(")");
-        return;
+        puts(")");
+        break;
 
-#define CASE(type, ...)                         \
-    case type:                                  \
-        printf(__VA_ARGS__);                    \
-        return
-    CASE(TINT, "%lld", obj->value);
-    CASE(TSYMBOL, "%s", obj->name);
-    CASE(TPRIMITIVE, "<primitive>");
-    CASE(TFUNCTION, "<function>");
-    CASE(TMACRO, "<macro>");
-    CASE(TMOVED, "<moved>");
-    CASE(TTRUE, "t");
-    CASE(TNIL, "()");
-#undef CASE
+    case TINT   : //lltoa(obj->value, result, 10);
+        printf("%lld", obj->value);
+        break;
+    case TSYMBOL: puts(obj->name);
+        break;
+    case TPRIMITIVE: puts("<primitive>");
+        break;
+    case TFUNCTION: puts("<function>");
+        break;
+    case TMACRO : puts("<macro>");
+        break;
+    case TMOVED : puts("<moved>");
+        break;
+    case TTRUE  : puts("t");
+        break;
+    case TNIL   : puts("()");
+        break;
     default:
         error("Bug: print: Unknown tag type: %d", obj->type);
     }
@@ -776,38 +804,29 @@ static void define_primitives(void *root, Obj **env) {
 // Entry point
 //======================================================================
 
-// Returns true if the environment variable is defined and not the empty string.
-static bool getEnvFlag(char *name) {
-    char *val = getenv(name);
-    return val && val[0];
-}
-
-int main(int argc, char **argv) {
-    // Debug flags
-    debug_gc = getEnvFlag("MINILISP_DEBUG_GC");
-    always_gc = getEnvFlag("MINILISP_ALWAYS_GC");
-
+void init_minilisp(Obj **env) {
     // Memory allocation
+    extern void *memory;
+    extern void *alloc_semispace();
     memory = alloc_semispace();
 
     // Constants and primitives
     Symbols = Nil;
-    void *root = NULL;
-    DEFINE2(env, expr);
+    root = NULL;
     *env = make_env(root, &Nil, &Nil);
     define_constants(root, env);
     define_primitives(root, env);
+    return env;
+}
 
-    // The main loop
-    for (;;) {
-        *expr = read_expr(root);
-        if (!*expr)
-            return 0;
-        if (*expr == Cparen)
-            error("Stray close parenthesis");
-        if (*expr == Dot)
-            error("Stray dot");
-        print(eval(root, env, expr));
-        printf("\n");
-    }
+void eval_input(char *input, Obj **env, Obj **expr) {
+    *expr = read_expr(input);
+    if (!*expr)
+        return;
+    if (*expr == Cparen)
+        error("Stray close parenthesis");
+    if (*expr == Dot)
+        error("Stray dot");
+    print(eval(root, env, expr));
+    puts("\n");
 }
