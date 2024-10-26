@@ -1,5 +1,77 @@
-MiniLisp
-========
+MiniLisp with REPL
+==================
+
+Foreword by N. Janin:
+This is my attempt at making rui314' MiniLisp slightly more user friendly.
+Not being limited by the 1000 lines challenge, I've added a few basic primitives 
+to the original program, while trying to keep the goal of simplicity and conciseness.
+Namely operators >, >=, <=, or, and, not, and function length.
+This has the side effect of being faster as well, since these primitives are compiled 
+instead of being interpreted.
+
+Among the bells and whistles, I've added a REPL based on jart's bestline.
+
+## Shortcuts
+
+```
+CTRL-Enter     CONTINUE ON NEXT LINE
+CTRL-E         END
+CTRL-A         START
+CTRL-B         BACK
+CTRL-F         FORWARD
+CTRL-L         CLEAR
+CTRL-H         BACKSPACE
+CTRL-D         DELETE
+CTRL-Y         YANK
+CTRL-D         EOF (IF EMPTY)
+CTRL-N         NEXT HISTORY
+CTRL-P         PREVIOUS HISTORY
+CTRL-R         SEARCH HISTORY
+CTRL-G         CANCEL SEARCH
+ALT-<          BEGINNING OF HISTORY
+ALT->          END OF HISTORY
+ALT-F          FORWARD WORD
+ALT-B          BACKWARD WORD
+CTRL-ALT-F     FORWARD EXPR
+CTRL-ALT-B     BACKWARD EXPR
+ALT-RIGHT      FORWARD EXPR
+ALT-LEFT       BACKWARD EXPR
+CTRL-K         KILL LINE FORWARDS
+CTRL-U         KILL LINE BACKWARDS
+ALT-H          KILL WORD BACKWARDS
+CTRL-W         KILL WORD BACKWARDS
+CTRL-ALT-H     KILL WORD BACKWARDS
+ALT-D          KILL WORD FORWARDS
+ALT-Y          ROTATE KILL RING AND YANK AGAIN
+ALT-\          SQUEEZE ADJACENT WHITESPACE
+CTRL-T         TRANSPOSE
+ALT-T          TRANSPOSE WORD
+ALT-U          UPPERCASE WORD
+ALT-L          LOWERCASE WORD
+ALT-C          CAPITALIZE WORD
+CTRL-C         INTERRUPT PROCESS
+CTRL-Z         SUSPEND PROCESS
+CTRL-\         QUIT PROCESS
+CTRL-S         PAUSE OUTPUT
+CTRL-Q         UNPAUSE OUTPUT (IF PAUSED)
+CTRL-Q         ESCAPED INSERT
+CTRL-SPACE     SET MARK
+CTRL-X CTRL-X  GOTO MARK
+CTRL-Z         SUSPEND PROCESS
+```
+
+The REPL also saves the history of commands in the file history.txt
+
+Known bugs:
+* Operators "and" and "or" do not work like their typical Lisp counterpart 
+because they evaluate all their operands at the same time instead of one
+by one.
+* The pasting in the REPL doesn't work well.
+* Multiline inputs are recalled as different lines
+
+
+Original README
+---------------
 
 One day I wanted to see what I can do with 1k lines of C and
 decided to write a Lisp interpreter. That turned to be a
