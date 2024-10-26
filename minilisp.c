@@ -7,9 +7,12 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <setjmp.h>
 #include <string.h>
 #include "minilisp.h"
 #include "gc.h"
+
+jmp_buf context;
 
 __attribute((noreturn)) void error(char *fmt, ...) {
     va_list ap;
@@ -17,7 +20,8 @@ __attribute((noreturn)) void error(char *fmt, ...) {
     vfprintf(stderr, fmt, ap);
     fprintf(stderr, "\n");
     va_end(ap);
-    exit(1);
+    // Jump right back to the end of eval 
+    longjmp(context, 1);
 }
 
 // Constants
@@ -818,14 +822,18 @@ void init_minilisp(Obj **env) {
     define_primitives(root, env);
 }
 
-void eval_input(char *input, Obj **env, Obj **expr) {
-    *expr = read_expr(input);
-    if (!*expr)
-        return;
-    if (*expr == Cparen)
-        error("Stray close parenthesis");
-    if (*expr == Dot)
-        error("Stray dot");
-    print(eval(root, env, expr));
-    puts("\n");
+int eval_input(char *input, Obj **env, Obj **expr) {
+    if (setjmp(context) == 0){
+        *expr = read_expr(input);
+        if (!*expr)
+            return 0;
+        if (*expr == Cparen)
+            error("Stray close parenthesis");
+        if (*expr == Dot)
+            error("Stray dot");
+        print(eval(root, env, expr));
+        puts("");
+        return 0;
+    }
+    else return 1;
 }
