@@ -226,38 +226,38 @@ static Obj *read_expr(void *root) {
 static void print(Obj *obj) {
     switch (obj->type) {
     case TCELL:
-        puts("(");
+        fputs("(", stdout);
         for (;;) {
             print(obj->car);
             if (obj->cdr == Nil)
                 break;
             if (obj->cdr->type != TCELL) {
-                puts(" . ");
+                fputs(" . ", stdout);
                 print(obj->cdr);
                 break;
             }
-            puts(" ");
+            fputs(" ", stdout);
             obj = obj->cdr;
         }
-        puts(")");
+        fputs(")", stdout);
         break;
 
     case TINT   : //lltoa(obj->value, result, 10);
         printf("%lld", obj->value);
         break;
-    case TSYMBOL: puts(obj->name);
+    case TSYMBOL: fputs(obj->name, stdout);
         break;
-    case TPRIMITIVE: puts("<primitive>");
+    case TPRIMITIVE: fputs("<primitive>", stdout);
         break;
-    case TFUNCTION: puts("<function>");
+    case TFUNCTION: fputs("<function>", stdout);
         break;
-    case TMACRO : puts("<macro>");
+    case TMACRO : fputs("<macro>", stdout);
         break;
-    case TMOVED : puts("<moved>");
+    case TMOVED : fputs("<moved>", stdout);
         break;
-    case TTRUE  : puts("t");
+    case TTRUE  : fputs("t", stdout);
         break;
-    case TNIL   : puts("()");
+    case TNIL   : fputs("()", stdout);
         break;
     default:
         error("Bug: print: Unknown tag type: %d", obj->type);
@@ -816,7 +816,6 @@ void init_minilisp(Obj **env) {
     *env = make_env(root, &Nil, &Nil);
     define_constants(root, env);
     define_primitives(root, env);
-    return env;
 }
 
 void eval_input(char *input, Obj **env, Obj **expr) {
