@@ -10,8 +10,9 @@
 (defun list (x . y)
   (cons x y))
 
-(defun not (x)
-  (if x () t))
+
+;(defun not (x)
+;  (if x () t))
 
 ;; (let var val body ...)
 ;; => ((lambda (var) body ...) val)
@@ -57,9 +58,9 @@
 ;;; Numeric operators
 ;;;
 
-(defun <= (e1 e2)
-  (or (< e1 e2)
-      (= e1 e2)))
+;(defun <= (e1 e2)
+;  (or (< e1 e2)
+;      (= e1 e2)))
 
 ;;;
 ;;; List operators

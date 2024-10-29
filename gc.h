@@ -10,7 +10,7 @@
 //======================================================================
 
 // The size of the heap in byte
-#define MEMORY_SIZE 65536
+#define MEMORY_SIZE 262144
 
 extern void *root;    // root of memory
 

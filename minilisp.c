@@ -103,7 +103,7 @@ const char symbol_chars[] = "~!@#$%^&*-_=+:/?<>";
 static Obj *read_expr(void *root);
 
 static int peek(void) {
-    int c = getchar();
+    char c = getchar();
     ungetc(c, stdin);
     return c;
 }
@@ -123,7 +123,7 @@ static Obj *reverse(Obj *p) {
 // Skips the input until newline is found. Newline is one of \r, \r\n or \n.
 static void skip_line(void) {
     for (;;) {
-        int c = getchar();
+        char c = getchar();
         if (c == EOF || c == '\n')
             return;
         if (c == '\r') {
@@ -199,7 +199,7 @@ static Obj *read_symbol(void *root, char c) {
 
 static Obj *read_expr(void *root) {
     for (;;) {
-        int c = getchar();
+        char c = getchar();
         if (c == ' ' || c == '\n' || c == '\r' || c == '\t')
             continue;
         if (c == EOF)
@@ -246,8 +246,7 @@ static void print(Obj *obj) {
         fputs(")", stdout);
         break;
 
-    case TINT   : //lltoa(obj->value, result, 10);
-        printf("%lld", obj->value);
+    case TINT   : printf("%lld", obj->value);
         break;
     case TSYMBOL: fputs(obj->name, stdout);
         break;
@@ -722,6 +721,10 @@ static Obj *prim_println(void *root, Obj **env, Obj **list) {
     return Nil;
 }
 
+static Obj *prim_progn(void *root, Obj **env, Obj **list) {
+    return progn(root, env, list);
+}
+
 // (if expr expr expr ...)
 static Obj *prim_if(void *root, Obj **env, Obj **list) {
     if (length(*list) < 2)
@@ -798,6 +801,7 @@ static void define_primitives(void *root, Obj **env) {
     add_primitive(root, env, "macroexpand", prim_macroexpand);
     add_primitive(root, env, "lambda", prim_lambda);
     add_primitive(root, env, "if", prim_if);
+    add_primitive(root, env, "progn", prim_progn);
     add_primitive(root, env, "=", prim_num_eq);
     add_primitive(root, env, "eq", prim_eq);
     add_primitive(root, env, "println", prim_println);

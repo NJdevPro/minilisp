@@ -9,21 +9,6 @@
 #include "gc.h"
 #include "minilisp.h"
 
-#if 0
-// should be ~50kb statically linked
-// will save history to ~/.foo_history
-// cc -fno-jump-tables -Os -o foo foo.c bestline.c
-int main() {
-    char *line;
-    while ((line = bestlineWithHistory("IN> ", "foo"))) {
-        fputs("OUT> ", stdout);
-        fputs(line, stdout);
-        fputs("\n", stdout);
-        free(line);
-    }
-}
-#endif
-
 
 int ends_with(const char *str, const char *suffix)
 {
@@ -65,19 +50,33 @@ char *hints(const char *buf, const char **ansi1, const char **ansi2) {
     return NULL;
 }
 
-void minilisp() {
+void minilisp(char *text, size_t length) {
 
-    DEFINE1(env);
+    DEFINE2(env, expr);
     init_minilisp(env);
 
-   /* Now this is the main loop of the typical bestline-based application.
+    if(text != NULL){
+        // Save old stdin
+        FILE * old_stdin = stdin;
+        // Open a memory stream
+        FILE * stream = fmemopen(text, strlen(text), "r");
+        // Redirect stdin to the in memory stream in order to use getchar()
+        stdin = stream;
+        eval_input(text, env, expr);
+        free(text);
+        // restore stdin
+        stdin = old_stdin;
+        fclose(stream);
+    }
+
+    /* Now this is the main loop of the typical bestline-based application.
      * The call to bestline() will block as long as the user types something
      * and presses enter.
      *
      * The typed string is returned as a malloc() allocated string by
      * bestline, so the user needs to free() it. */
-    int promptnum = 1;
-    for(;;promptnum++) {
+
+    for(int promptnum = 1;;promptnum++) {
         char prompt[15] = "";
         sprintf(prompt, "%d:", promptnum);
         char *line = bestline(prompt);
@@ -89,11 +88,8 @@ void minilisp() {
         FILE * stream = fmemopen(line, strlen(line), "r");
         // Redirect stdin to the in memory stream in order to use getchar()
         stdin = stream;
-
-        usleep(50000);
         
         if (line[0] != '\0' && line[0] != '/') {
-            DEFINE1(expr);
             int ok = eval_input(line, env, expr);
             if (ok == 0) {
                 bestlineHistoryAdd(line); /* Add to the history. */
@@ -106,7 +102,7 @@ void minilisp() {
         } else if (line[0] == '/') {
             fputs("Unreconized command: ", stdout);
             fputs(line, stdout);
-            fputs("\n", stdout);
+            putchar('\n');
         }
 
         free(line);
@@ -114,22 +110,80 @@ void minilisp() {
         stdin = old_stdin;
         fclose(stream);
     }
+    
 }
 
 __attribute((noreturn)) void error(char *fmt, ...);
 
+static size_t read_file(char *fname, char **text) {
+    size_t length = 0;
+    FILE *f = fopen(fname, "r");
+    if (!f) {
+        error("Failed to load file %s", fname);
+        return 0;
+    }
+
+    fseek(f, 0, SEEK_END);
+    length = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    
+    *text = malloc(length + 1);
+    if (!*text) {
+        error("Out of memory.");
+        fclose(f);
+        return 0;
+    }
+
+    size_t read = fread(*text, 1, length, f);
+    if (read != length) {
+        error("Failed to read entire file");
+        free(*text);
+        *text = NULL;
+        fclose(f);
+        return 0;
+    }
+
+    (*text)[length] = '\0';
+    fclose(f);
+    return length;
+}
+
+void process_file(char *fname, Obj **env, Obj **expr) {
+    char *text;
+    size_t len = read_file(fname, &text);
+    if (len == 0) return;
+
+    // Save old stdin
+    FILE *old_stdin = stdin;
+    // Create a single stream for the entire file
+    FILE *stream = fmemopen(text, len, "r");
+    if (!stream) {
+        free(text);
+        error("Failed to create memory stream");
+        return;
+    }
+
+    // Redirect stdin to the memory stream
+    stdin = stream;
+
+    // Process expressions until we reach end of file
+    while (1) {
+        eval_input(text, env, expr);
+    }
+
+    // Cleanup
+    stdin = old_stdin;
+    fclose(stream);
+    free(text);
+}
+
 int main(int argc, char **argv) {
 
-    if (argc > 1){
-        FILE *file;
-        file = fopen(argv[1], "r");
-        if (file) {
-            char c;
-            while ((c = getc(file)) != EOF)
-                putchar(c);
-            fclose(file);
-        }
-        else error("Failed to open file ", argv[1]);
+    DEFINE2(env, expr);
+    init_minilisp(env);
+
+    if (argc > 1) {
+        process_file(argv[1], env, expr);
     }
 
     /* Set the completion callback. This will be called every time the
@@ -141,7 +195,7 @@ int main(int argc, char **argv) {
      * where entries are separated by newlines. */
     bestlineHistoryLoad("history.txt"); /* Load the history at startup */
 
-    minilisp();
-        
+    minilisp(NULL, 0);
+
     return 0;
 }
