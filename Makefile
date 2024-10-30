@@ -16,7 +16,7 @@ minilisp: bestline.o
 
 clean:
 	cd bestline && $(MAKE) clean
-	rm -f minilisp *~
+	cd src && rm -f minilisp *~
 
 test: minilisp
 	@./test.sh
