@@ -14,6 +14,11 @@ instead of being interpreted.
 
 Among the bells and whistles, I've added a REPL based on Justine Tunney (jart)'s bestline.
 
+In this version, instead of passing a file using pipes, you simply pass the files as command parameters :
+./minilisp f1 f2 etc
+
+The files all share the same environment, so all the symbols, functions and macros defined in f1 can be reused in the following files. 
+
 ## Shortcuts
 
 ```
