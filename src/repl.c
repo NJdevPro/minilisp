@@ -5,7 +5,7 @@
 #endif
 #include <unistd.h>
 #include <sys/select.h>
-#include "bestline/bestline.h"
+#include "../bestline/bestline.h"
 #include "gc.h"
 #include "minilisp.h"
 
