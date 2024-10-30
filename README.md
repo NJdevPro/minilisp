@@ -5,11 +5,16 @@ Foreword by N. Janin:
 This is my attempt at making Rui Ueyama (rui314)'s MiniLisp slightly more user friendly.
 Not being limited by the 1000 lines challenge, I've added a few basic primitives 
 to the original program, while trying to keep the goal of simplicity and conciseness.
-Namely operators >, >=, <=, or, and, not, and function length.
+Namely operators >, >=, <=, or, and, not, and functions progn, length.
 This has the side effect of being faster as well, since these primitives are compiled 
 instead of being interpreted.
 
 Among the bells and whistles, I've added a REPL based on Justine Tunney (jart)'s bestline.
+
+In this version, instead of passing a file using pipes, you simply pass the files as command parameters :
+./minilisp f1 f2 etc
+
+The files all share the same environment, so all the symbols, functions and macros defined in f1 can be reused in the following files. 
 
 ## Shortcuts
 
