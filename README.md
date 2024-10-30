@@ -78,6 +78,18 @@ CTRL-Z         SUSPEND PROCESS
 ```
 
 The REPL also saves the history of commands in the file history.txt
+<<<<<<< HEAD
+=======
+
+Known bugs:
+* Operators "and" and "or" do not work like their typical Lisp counterpart 
+because they evaluate all their operands at the same time instead of one
+by one.
+
+
+Original README
+=======
+>>>>>>> 0822c20 (Update README)
 This file is loaded at startup, so one can recall previous commands.
 
 Future improvements:
