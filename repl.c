@@ -167,7 +167,7 @@ void process_file(char *fname, Obj **env, Obj **expr) {
     stdin = stream;
 
     // Process expressions until we reach end of file
-    while (1) {
+    while (!feof(stream)) {
         eval_input(text, env, expr);
     }
 
