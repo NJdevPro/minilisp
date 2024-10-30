@@ -136,17 +136,17 @@
 (defun get (board x y)
   (nth (nth board x) y))
 
-;; Set symbol "@" to location (x, y).
+;; Set symbol "Q" to location (x, y).
 (defun set (board x y)
-  (setcar (nth-tail (nth board x) y) '@))
+  (setcar (nth-tail (nth board x) y) 'Q))
 
 ;; Set symbol "x" to location (x, y).
 (defun clear (board x y)
   (setcar (nth-tail (nth board x) y) 'x))
 
-;; Returns true if location (x, y)'s value is "@".
+;; Returns true if location (x, y)'s value is "Q".
 (defun set? (board x y)
-  (eq (get board x y) '@))
+  (eq (get board x y) 'Q))
 
 ;; Print out the given board.
 (defun print (board)
