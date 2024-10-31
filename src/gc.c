@@ -159,6 +159,7 @@ static void gc(void *root) {
     while (scan1 < scan2) { // 將 root 指向的物件從 scan1 (FROM) 搬到 scan2 (to) 去
         switch (scan1->type) {
         case TINT:
+        case TSTRING:
         case TSYMBOL:
         case TPRIMITIVE:
             // Any of the above types does not contain a pointer to a GC-managed object.
