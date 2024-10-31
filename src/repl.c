@@ -9,7 +9,6 @@
 #include "gc.h"
 #include "minilisp.h"
 
-
 int ends_with(const char *str, const char *suffix)
 {
     if (!str || !suffix)
@@ -59,7 +58,7 @@ void minilisp(char *text, size_t length) {
         // Save old stdin
         FILE * old_stdin = stdin;
         // Open a memory stream
-        FILE * stream = fmemopen(text, strlen(text), "r");
+        FILE * stream = fmemopen(text, length, "r");
         // Redirect stdin to the in memory stream in order to use getchar()
         stdin = stream;
         eval_input(text, env, expr);
@@ -75,8 +74,7 @@ void minilisp(char *text, size_t length) {
      *
      * The typed string is returned as a malloc() allocated string by
      * bestline, so the user needs to free() it. */
-
-    for(int promptnum = 1;;promptnum++) {
+   for(int promptnum = 1;;promptnum++) {
         char prompt[15] = "";
         sprintf(prompt, "%d:", promptnum);
         char *line = bestline(prompt);
@@ -88,8 +86,11 @@ void minilisp(char *text, size_t length) {
         FILE * stream = fmemopen(line, strlen(line), "r");
         // Redirect stdin to the in memory stream in order to use getchar()
         stdin = stream;
+
+        usleep(50000);
         
         if (line[0] != '\0' && line[0] != '/') {
+            DEFINE1(expr);
             int ok = eval_input(line, env, expr);
             if (ok == 0) {
                 bestlineHistoryAdd(line); /* Add to the history. */
@@ -102,7 +103,7 @@ void minilisp(char *text, size_t length) {
         } else if (line[0] == '/') {
             fputs("Unreconized command: ", stdout);
             fputs(line, stdout);
-            putchar('\n');
+           putchar('\n');
         }
 
         free(line);
@@ -110,7 +111,6 @@ void minilisp(char *text, size_t length) {
         stdin = old_stdin;
         fclose(stream);
     }
-    
 }
 
 __attribute((noreturn)) void error(char *fmt, ...);
@@ -182,8 +182,8 @@ int main(int argc, char **argv) {
     DEFINE2(env, expr);
     init_minilisp(env);
 
-    if (argc > 1) {
-        process_file(argv[1], env, expr);
+    for (int i = 1; i < argc; i++) {
+       process_file(argv[i], env, expr);
     }
 
     /* Set the completion callback. This will be called every time the

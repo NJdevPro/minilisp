@@ -197,6 +197,38 @@ static Obj *read_symbol(void *root, char c) {
     return intern(root, buf);
 }
 
+static Obj *make_string(void *root, const char *str) {
+    size_t len = strlen(str);
+    Obj *r = alloc(root, TSTRING, len + 1);
+    strcpy(r->name, str);  // We can reuse the name field for string data
+    return r;
+}
+
+static Obj *read_string(void *root) {
+    char buf[1024];
+    int i = 0;
+    
+    while (1) {
+        int c = getchar();
+        if (c == EOF)
+            error("Unclosed string literal");
+        if (c == '"')
+            break;
+        if (c == '\\') {
+            c = getchar();
+            if (c == 'n') c = '\n';
+            else if (c == 't') c = '\t';
+            else if (c == 'r') c = '\r';
+            // Add more escape sequences as needed
+        }
+        if (i >= sizeof(buf) - 1)
+            error("String too long");
+        buf[i++] = c;
+    }
+    buf[i] = '\0';
+    return make_string(root, buf);
+}
+
 static Obj *read_expr(void *root) {
     for (;;) {
         char c = getchar();
@@ -216,6 +248,8 @@ static Obj *read_expr(void *root) {
             return Dot;
         if (c == '\'')
             return read_quote(root);
+        if (c == '"')
+            return read_string(root);
         if (isdigit(c))
             return make_int(root, read_number(c - '0'));
         if (c == '-' && isdigit(peek()))
@@ -230,7 +264,7 @@ static Obj *read_expr(void *root) {
 static void print(Obj *obj) {
     switch (obj->type) {
     case TCELL:
-        fputs("(", stdout);
+        fputc('(', stdout);
         for (;;) {
             print(obj->car);
             if (obj->cdr == Nil)
@@ -240,10 +274,10 @@ static void print(Obj *obj) {
                 print(obj->cdr);
                 break;
             }
-            fputs(" ", stdout);
+            fputc(' ', stdout);
             obj = obj->cdr;
         }
-        fputs(")", stdout);
+        fputc(')', stdout);
         break;
 
     case TINT   : printf("%lld", obj->value);
@@ -258,9 +292,20 @@ static void print(Obj *obj) {
         break;
     case TMOVED : fputs("<moved>", stdout);
         break;
-    case TTRUE  : fputs("t", stdout);
+    case TTRUE  : fputc('t', stdout);
         break;
     case TNIL   : fputs("()", stdout);
+        break;
+    case TSTRING:
+        fputc('"', stdout);
+        for (char *p = obj->name; *p; p++) {
+            if (*p == '"') printf("\\\"");
+            else if (*p == '\n') fputc('\n', stdout);
+            else if (*p == '\t') fputc('\t', stdout);
+            else if (*p == '\r') fputc('\r', stdout);
+            else fputc(*p, stdout);
+        }
+        fputc('"', stdout);
         break;
     default:
         error("Bug: print: Unknown tag type: %d", obj->type);
@@ -382,6 +427,7 @@ static Obj *macroexpand(void *root, Obj **env, Obj **obj) {
 static Obj *eval(void *root, Obj **env, Obj **obj) {
     switch ((*obj)->type) {
     case TINT:
+    case TSTRING:
     case TPRIMITIVE:
     case TFUNCTION:
     case TTRUE:
@@ -494,20 +540,37 @@ static Obj *prim_gensym(void *root, Obj **env, Obj **list) {
   return make_symbol(root, buf);
 }
 
-// (length ...)
+// (length <cell> | ...)
 static Obj *prim_length(void *root, Obj **env, Obj **list) {
     Obj *args = eval_list(root, env, list);
-    if (length(args) != 1)
-        error("length takes 1 argument");
-    Obj *lst = args->car;
-    
-    if (lst != Nil && lst->type != TCELL)
-        error("Argument to length must be a list");
-
-    int len = 0;
-    for (; lst != Nil && lst->type == TCELL; lst = lst->cdr) 
-        len++;
+    int len = length(args);
+    if (len != 1) {
+        // number of arguments to length
+    }
+    else {
+        Obj *lst = args->car;
+        if (lst != Nil && lst->type != TCELL)
+            error("When length has a single argument, it must be a list");
+        for (len = 0; lst != Nil && lst->type == TCELL; lst = lst->cdr) 
+            len++;
+    }
     return make_int(root, len);
+}
+
+// (reverse ... | reverse <cell>)
+static Obj *prim_reverse(void *root, Obj **env, Obj **list) {
+    Obj *args = eval_list(root, env, list);
+    int len = length(args);
+    if (len > 1) {
+        // reverse the arguments to reverse
+        return reverse(args);
+    }
+    else { // reverse a list
+        Obj *lst = args->car;
+        if (lst != Nil && lst->type != TCELL)
+            error("Argument to reverse must be a list");
+        return reverse(lst);
+    }
 }
 
 // (+ <integer> ...)
@@ -618,7 +681,7 @@ static Obj *prim_gte(void *root, Obj **env, Obj **list) {
     return x->value >= y->value ? True : Nil;
 }
 
-// (not ...)
+// (not <cell>)
 static Obj *prim_not(void *root, Obj **env, Obj **list) {
     if (length(*list) != 1)
         error("not accepts 1 argument");
@@ -646,8 +709,27 @@ static Obj *prim_or(void *root, Obj **env, Obj **list) {
     return car;
 }
 
+extern void process_file(char *fname, Obj **env, Obj **expr);
+
+static Obj *prim_load(void *root, Obj **env, Obj **list) {
+    DEFINE1(expr);
+    Obj *args = eval_list(root, env, list);
+    if (args->car->type != TSTRING){
+        error("load: filename must be a string");
+    }
+    char *name = args->car->name;
+    process_file(name, env, expr );
+    return Nil;
+}
+
 static Obj *prim_exit(void *root, Obj **env, Obj **list) {
-    exit(0);
+    if (length(*list) != 1)
+        error("exit accepts 1 argument");
+    Obj *values = eval_list(root, env, list);
+    Obj *first = values->car; 
+    if (first->type != TINT)
+        error("* must be an integer");
+    exit(first->value);
 }
 
 static Obj *handle_function(void *root, Obj **env, Obj **list, int type) {
@@ -712,12 +794,19 @@ static Obj *prim_macroexpand(void *root, Obj **env, Obj **list) {
     return macroexpand(root, env, body);
 }
 
-// (println expr)
-static Obj *prim_println(void *root, Obj **env, Obj **list) {
+// (print expr)
+static Obj *prim_print(void *root, Obj **env, Obj **list) {
     DEFINE1(tmp);
     *tmp = (*list)->car;
     print(eval(root, env, tmp));
-    printf("\n");
+    return Nil;
+}
+
+
+// (println expr)
+static Obj *prim_println(void *root, Obj **env, Obj **list) {
+    prim_print(root, env, list);
+    fputc('\n', stdout);
     return Nil;
 }
 
@@ -760,6 +849,83 @@ static Obj *prim_eq(void *root, Obj **env, Obj **list) {
     return values->car == values->cdr->car ? True : Nil;
 }
 
+// String primitives
+static Obj *prim_string_concat(void *root, Obj **env, Obj **list) {
+    Obj *args = eval_list(root, env, list);
+    
+    // First pass: calculate total length needed
+    size_t total_len = 1;  // Start with 1 for null terminator
+    for (Obj *p = args; p != Nil; p = p->cdr) {
+        if (p->car->type != TSTRING && p->car->type != TINT)
+            error("string-concat arguments must be strings or numbers");
+        if (p->car->type == TINT) {
+            long long val = p->car->value;
+            char var[22];
+            snprintf(var, sizeof(var), "%lld", val);
+            total_len += strlen(var);
+        }
+        else {
+            total_len += strlen(p->car->name);
+        }
+    }
+    
+    char *buf = malloc(total_len);
+    if (!buf)
+        error("Out of memory in string-concat");
+    buf[0] = '\0';
+    
+    // Second pass: concatenate all strings
+    for (Obj *p = args; p != Nil; p = p->cdr) {
+        if (p->car->type == TINT) {
+            long long val = p->car->value;
+            char var[22];
+            snprintf(var, sizeof(var), "%lld", val);
+            strcat(buf, var);
+        }
+        else {
+            strcat(buf, p->car->name);
+        }
+    }
+    
+    Obj *result = make_string(root, buf);
+    free(buf);
+    return result;
+}
+
+static Obj *prim_symbol_to_string(void *root, Obj **env, Obj **list) {
+    Obj *args = eval_list(root, env, list);
+    if (length(args) != 1)
+        error("symbol->string requires 1 argument");
+    
+    if (args->car->type != TSYMBOL)
+        error("symbol->string argument must be a symbol");
+        
+    return make_string(root, args->car->name);
+}
+
+static Obj *prim_string_to_symbol(void *root, Obj **env, Obj **list) {
+    Obj *args = eval_list(root, env, list);
+    if (length(args) != 1)
+        error("string->symbol requires 1 argument");
+    
+    if (args->car->type != TSTRING)
+        error("string->symbol argument must be a string");
+        
+    return intern(root, args->car->name);
+}
+
+// String comparison
+static Obj *prim_string_eq(void *root, Obj **env, Obj **list) {
+    Obj *args = eval_list(root, env, list);
+    if (length(args) != 2)
+        error("string= requires 2 arguments");
+    
+    if (args->car->type != TSTRING || args->cdr->car->type != TSTRING)
+        error("string= arguments must be strings");
+        
+    return strcmp(args->car->name, args->cdr->car->name) == 0 ? True : Nil;
+}
+
 static void add_primitive(void *root, Obj **env, char *name, Primitive *fn) {
     DEFINE2(sym, prim);
     *sym = intern(root, name);
@@ -783,11 +949,14 @@ static void define_primitives(void *root, Obj **env) {
     add_primitive(root, env, "while", prim_while);
     add_primitive(root, env, "gensym", prim_gensym);
     add_primitive(root, env, "length", prim_length);
+    add_primitive(root, env, "reverse", prim_reverse);
     add_primitive(root, env, "+", prim_plus);
     add_primitive(root, env, "-", prim_minus);
     add_primitive(root, env, "*", prim_mult);
     add_primitive(root, env, "/", prim_div);
     add_primitive(root, env, "mod", prim_modulo);
+    add_primitive(root, env, "=", prim_num_eq);
+    add_primitive(root, env, "eq", prim_eq);
     add_primitive(root, env, "<", prim_lt);
     add_primitive(root, env, ">", prim_gt);
     add_primitive(root, env, "<=", prim_lte);
@@ -802,9 +971,13 @@ static void define_primitives(void *root, Obj **env) {
     add_primitive(root, env, "lambda", prim_lambda);
     add_primitive(root, env, "if", prim_if);
     add_primitive(root, env, "progn", prim_progn);
-    add_primitive(root, env, "=", prim_num_eq);
-    add_primitive(root, env, "eq", prim_eq);
+    add_primitive(root, env, "print", prim_print);
     add_primitive(root, env, "println", prim_println);
+    add_primitive(root, env, "string-concat", prim_string_concat);
+    add_primitive(root, env, "symbol->string", prim_symbol_to_string);
+    add_primitive(root, env, "string->symbol", prim_string_to_symbol);
+    add_primitive(root, env, "string=", prim_string_eq);
+    add_primitive(root, env, "load", prim_load);
     add_primitive(root, env, "exit", prim_exit);
 }
 

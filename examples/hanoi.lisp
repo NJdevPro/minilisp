@@ -1,17 +1,4 @@
-;(defun list (x . y) (cons x y))
-
-;(defun list2 (a b) (cons a (cons b ())))
-;(defun list3 (a b c) (cons a (cons b (cons c ()))))
-
-(defmacro cond (rest)
-  (if (= () rest) 
-      ()
-      (if (= (car (car rest)) t)
-          (car (cdr (car rest)))
-          (list 'if 
-                (car (car rest))
-                (car (cdr (car rest)))
-                (cond (cdr rest))))))
+(defun list (x . y) (cons x y))
 
 (defun mapc1 (fn xs)
   (if (= () xs)
@@ -21,13 +8,9 @@
         (mapc1 fn (cdr xs)))))
 
 (defun hanoi-print (disk from to)
-  (println (cons 'Move 
-           (cons 'disk 
-           (cons disk
-           (cons 'from
-           (cons from
-           (cons 'to
-           (cons to ())))))))))
+  (println (string-concat "Move disk " disk 
+    " from " (symbol->string from) 
+    " to " (symbol->string to) )))
 
 (defun hanoi-move (n from to via)
   (if (= n 1)

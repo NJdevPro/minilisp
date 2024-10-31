@@ -2,11 +2,16 @@ MiniLisp with REPL
 ==================
 
 Foreword by N. Janin:
-This is my attempt at making Rui Ueyama (rui314)'s MiniLisp slightly more user friendly.
+This is my attempt at making Rui Ueyama (rui314)'s MiniLisp slightly more user friendly and powerful.
 Not being limited by the 1000 lines challenge, I've added a few basic primitives 
 to the original program, while trying to keep the goal of simplicity and conciseness.
-Namely operators >, >=, <=, or, and, not, and functions progn, length.
-This has the side effect of being faster as well, since these primitives are compiled 
+The whole program compiles to less than 100 kb without debugging symbols and should be able to run on low powered devices.
+
+The added primitives:
+* strings
+* operators >, >=, <=, or, and, not,
+* functions length, reverse, progn, load.
+This has the side effect of being much faster as well, since all these primitives are compiled 
 instead of being interpreted.
 
 Among the bells and whistles, I've added a REPL based on Justine Tunney (jart)'s bestline.
@@ -66,16 +71,18 @@ CTRL-Z         SUSPEND PROCESS
 ```
 
 The REPL also saves the history of commands in the file history.txt
+This file is loaded at startup, so one can recall previous commands.
+
+Future improvements:
+- floating point numbers
+- data files
 
 Known bugs:
-* Operators "and" and "or" do not work like their typical Lisp counterpart 
-because they evaluate all their operands at the same time instead of one
-by one.
-* The pasting in the REPL doesn't work well.
-* Multiline inputs are recalled as different lines
+* the paste function does not work very well.
+* recall of multiline commands does not work as expected. 
 
 
-Original README
+Original README (completed)
 ---------------
 
 One day I wanted to see what I can do with 1k lines of C and
@@ -83,7 +90,7 @@ decided to write a Lisp interpreter. That turned to be a
 fun weekend project, and the outcome is a mini lisp implementation
 that supports
 
-- integers, symbols, cons cells,
+- integers, symbols, cons cells
 - global variables,
 - lexically-scoped local variables,
 - closures,
@@ -163,6 +170,13 @@ car.
     (setcar cell 'x)
     cell  ; -> (x . b)
 
+`length` and `reverse` operate on a whole list. They can also operate on their arguments.
+
+    (length '(1 2 3)) ; -> 3
+    (length 1 2 t) ; -> 3
+    (reverse '(a b c)) ; -> (c b a)
+    (reverse '(a) b c) ; -> (c b (a))
+
 ### Numeric operators
 
 `+` returns the sum of the arguments.
@@ -193,6 +207,28 @@ the second.
     (< 3 3)    ; -> ()
     (< 4 3)    ; -> ()
 
+The other comparison operators `>`, `<=`, `>=` work in a similar fashion.
+
+`and` takes two or more arguments, evaluates them, and returns the last argument
+that returns true, if all the arguments return true, or () otherwise.
+
+    (and 1 t 2)         ; -> 2
+    (and 1 t (- 3 4))   ; -> -1
+    (and 1 () 2)        ; -> ()
+    (and)               ; t
+
+`or` takes two or more arguments, evaluates them, and returns the first argument
+that returns true.
+
+    (or 1 () 2)  ; -> 1
+    (or () ())   ; -> ()
+    (or)         ; -> ()
+
+NB: because all the arguments are evaluated, `and` and `or` do not operate like 
+their counterparts written in Lisp, as those stop evaluation at the first argument
+that returns. If the arguments have side effects, this may affect the program 
+differently.
+
 ### Conditionals
 
 `(if cond then else)` is the only conditional in the language. It first
@@ -209,18 +245,50 @@ loop by tail recursion in MiniLisp. The answer is no. Tail calls consume stack
 space in MiniLisp, so a loop written as recursion will fail with the memory
 exhaustion error.
 
+### Imperative programming
+
+`progn` executes several expressions consecutively.
+
+    (progn (print 'I 'own) 
+        (defun add(x y)(+ x y)
+        (println (add 3 7) 'cents)))  ; -> I own 
+                                         10 cents
+
 ### Equivalence test operators
 
 `eq` takes two arguments and returns `t` if the objects are the same. What `eq`
 really does is a pointer comparison, so two objects happened to have the same
 contents but actually different are considered to not be the same by `eq`.
 
+### String functions
+
+`string=` compares two strings.
+
+    (string= "Hello" "Hello")    ; -> t
+    (string= "Hello" "World")    ; -> ()
+    
+`string-concat` concatenates strings.
+
+    (string-concat) ;                 -> ""
+    (string-concat "A" "B" "C" "D") ; -> "ABCD"
+
+`symbol->string` turns a symbol into a string.
+    
+    (define sym 'hello)    ; -> hello
+    (symbol->string sym)   ; -> "hello"
+
+`string->symbol` turns a string into a symbol of the same name.
+
+    (string->symbol "hello")   ; -> hello
+
 ### Output operators
 
-`println` prints a given object to the standard output.
+`print` prints a given object to the standard output.
 
-    (println 3)               ; prints "3"
-    (println '(hello world))  ; prints "(hello world)"
+    (print 3)               ; prints "3"
+    (print '(hello world))  ; prints "(hello world)"
+
+`println` does the same, adding a return at the end.
 
 ### Definitions
 
@@ -276,6 +344,15 @@ is not defined.
 
     (define val (+ 3 5))
     (setq val (+ val 1))  ; increment "val"
+
+### system functions
+`load` loads a Lisp file and evaluates all its content, adding it to the environment.
+
+    (load 'example/nqueens.lisp) -> run the file and store its evaluated functions and macros
+
+`exit` quits the interpreter and returns integer passed as parameter.
+
+    (exit 0) -> quit with success
 
 ### Macros
 
