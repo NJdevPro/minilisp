@@ -17,8 +17,8 @@
 
 ;; (progn expr ...)
 ;; => ((lambda () expr ...))
-(defmacro progn (expr . rest)
-  (list (cons 'lambda (cons () (cons expr rest)))))
+;(defmacro progn (expr . rest)
+;  (list (cons 'lambda (cons () (cons expr rest)))))
 
 (defun list (x . y) (cons x y))
 
