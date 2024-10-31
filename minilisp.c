@@ -103,7 +103,7 @@ const char symbol_chars[] = "~!@#$%^&*-_=+:/?<>";
 static Obj *read_expr(void *root);
 
 static int peek(void) {
-    int c = getchar();
+    char c = getchar();
     ungetc(c, stdin);
     return c;
 }
@@ -123,7 +123,7 @@ static Obj *reverse(Obj *p) {
 // Skips the input until newline is found. Newline is one of \r, \r\n or \n.
 static void skip_line(void) {
     for (;;) {
-        int c = getchar();
+        char c = getchar();
         if (c == EOF || c == '\n')
             return;
         if (c == '\r') {
@@ -199,7 +199,7 @@ static Obj *read_symbol(void *root, char c) {
 
 static Obj *read_expr(void *root) {
     for (;;) {
-        int c = getchar();
+        char c = getchar();
         if (c == ' ' || c == '\n' || c == '\r' || c == '\t')
             continue;
         if (c == EOF)
@@ -246,8 +246,7 @@ static void print(Obj *obj) {
         fputs(")", stdout);
         break;
 
-    case TINT   : //lltoa(obj->value, result, 10);
-        printf("%lld", obj->value);
+    case TINT   : printf("%lld", obj->value);
         break;
     case TSYMBOL: fputs(obj->name, stdout);
         break;
@@ -495,20 +494,37 @@ static Obj *prim_gensym(void *root, Obj **env, Obj **list) {
   return make_symbol(root, buf);
 }
 
-// (length ...)
+// (length <cell> | ...)
 static Obj *prim_length(void *root, Obj **env, Obj **list) {
     Obj *args = eval_list(root, env, list);
-    if (length(args) != 1)
-        error("length takes 1 argument");
-    Obj *lst = args->car;
-    
-    if (lst != Nil && lst->type != TCELL)
-        error("Argument to length must be a list");
-
-    int len = 0;
-    for (; lst != Nil && lst->type == TCELL; lst = lst->cdr) 
-        len++;
+    int len = length(args);
+    if (len != 1) {
+        // number of arguments to length
+    }
+    else {
+        Obj *lst = args->car;
+        if (lst != Nil && lst->type != TCELL)
+            error("When length has a single argument, it must be a list");
+        for (len = 0; lst != Nil && lst->type == TCELL; lst = lst->cdr) 
+            len++;
+    }
     return make_int(root, len);
+}
+
+// (reverse ... | reverse <cell>)
+static Obj *prim_reverse(void *root, Obj **env, Obj **list) {
+    Obj *args = eval_list(root, env, list);
+    int len = length(args);
+    if (len > 1) {
+        // reverse the arguments to reverse
+        return reverse(args);
+    }
+    else { // reverse a list
+        Obj *lst = args->car;
+        if (lst != Nil && lst->type != TCELL)
+            error("Argument to reverse must be a list");
+        return reverse(lst);
+    }
 }
 
 // (+ <integer> ...)
@@ -619,7 +635,7 @@ static Obj *prim_gte(void *root, Obj **env, Obj **list) {
     return x->value >= y->value ? True : Nil;
 }
 
-// (not ...)
+// (not <cell>)
 static Obj *prim_not(void *root, Obj **env, Obj **list) {
     if (length(*list) != 1)
         error("not accepts 1 argument");
@@ -647,8 +663,18 @@ static Obj *prim_or(void *root, Obj **env, Obj **list) {
     return car;
 }
 
+static Obj *prim_load(void *root, Obj **env, Obj **list) {
+    extern size_t read_file(char *fname, char **text);
+}
+
 static Obj *prim_exit(void *root, Obj **env, Obj **list) {
-    exit(0);
+    if (length(*list) != 1)
+        error("exit accepts 1 argument");
+    Obj *values = eval_list(root, env, list);
+    Obj *first = values->car; 
+    if (first->type != TINT)
+        error("* must be an integer");
+    exit(first->value);
 }
 
 static Obj *handle_function(void *root, Obj **env, Obj **list, int type) {
@@ -722,6 +748,10 @@ static Obj *prim_println(void *root, Obj **env, Obj **list) {
     return Nil;
 }
 
+static Obj *prim_progn(void *root, Obj **env, Obj **list) {
+    return progn(root, env, list);
+}
+
 // (if expr expr expr ...)
 static Obj *prim_if(void *root, Obj **env, Obj **list) {
     if (length(*list) < 2)
@@ -780,11 +810,14 @@ static void define_primitives(void *root, Obj **env) {
     add_primitive(root, env, "while", prim_while);
     add_primitive(root, env, "gensym", prim_gensym);
     add_primitive(root, env, "length", prim_length);
+    add_primitive(root, env, "reverse", prim_reverse);
     add_primitive(root, env, "+", prim_plus);
     add_primitive(root, env, "-", prim_minus);
     add_primitive(root, env, "*", prim_mult);
     add_primitive(root, env, "/", prim_div);
     add_primitive(root, env, "mod", prim_modulo);
+    add_primitive(root, env, "=", prim_num_eq);
+    add_primitive(root, env, "eq", prim_eq);
     add_primitive(root, env, "<", prim_lt);
     add_primitive(root, env, ">", prim_gt);
     add_primitive(root, env, "<=", prim_lte);
@@ -798,9 +831,9 @@ static void define_primitives(void *root, Obj **env) {
     add_primitive(root, env, "macroexpand", prim_macroexpand);
     add_primitive(root, env, "lambda", prim_lambda);
     add_primitive(root, env, "if", prim_if);
-    add_primitive(root, env, "=", prim_num_eq);
-    add_primitive(root, env, "eq", prim_eq);
+    add_primitive(root, env, "progn", prim_progn);
     add_primitive(root, env, "println", prim_println);
+    add_primitive(root, env, "load", prim_load);
     add_primitive(root, env, "exit", prim_exit);
 }
 

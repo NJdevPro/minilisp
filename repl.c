@@ -70,7 +70,21 @@ void minilisp() {
     DEFINE1(env);
     init_minilisp(env);
 
-   /* Now this is the main loop of the typical bestline-based application.
+    if(text != NULL){
+        // Save old stdin
+        FILE * old_stdin = stdin;
+        // Open a memory stream
+        FILE * stream = fmemopen(text, length, "r");
+        // Redirect stdin to the in memory stream in order to use getchar()
+        stdin = stream;
+        eval_input(text, env, expr);
+        free(text);
+        // restore stdin
+        stdin = old_stdin;
+        fclose(stream);
+    }
+
+    /* Now this is the main loop of the typical bestline-based application.
      * The call to bestline() will block as long as the user types something
      * and presses enter.
      *
@@ -120,16 +134,23 @@ __attribute((noreturn)) void error(char *fmt, ...);
 
 int main(int argc, char **argv) {
 
-    if (argc > 1){
-        FILE *file;
-        file = fopen(argv[1], "r");
-        if (file) {
-            char c;
-            while ((c = getc(file)) != EOF)
-                putchar(c);
-            fclose(file);
+   bool no_hist = false;
+
+    DEFINE2(env, expr);
+    init_minilisp(env);
+
+    if (argc > 1) {
+        for (int i = 1; i <= argc; ++i){
+            char *arg = argv[i];
+            if (strcmp(arg, "--no-history") == 0){
+                no_hist = true;
+            }
+            else if ((strcmp(arg, "--exec") == 0) || (strcmp(arg, "--exec")) == 0){ 
+
+            }
+            else
+                process_file(arg, env, expr);
         }
-        else error("Failed to open file ", argv[1]);
     }
 
     /* Set the completion callback. This will be called every time the
@@ -139,7 +160,9 @@ int main(int argc, char **argv) {
 
     /* Load history from file. The history file is just a plain text file
      * where entries are separated by newlines. */
-    bestlineHistoryLoad("history.txt"); /* Load the history at startup */
+    if (!no_hist) {
+        bestlineHistoryLoad("history.txt"); /* Load the history at startup */
+    }
 
     minilisp();
         
