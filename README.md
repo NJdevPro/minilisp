@@ -260,9 +260,9 @@ exhaustion error.
 
 `progn` executes several expressions consecutively.
 
-    (progn (println 'I 'own) 
+    (progn (print 'I 'own) 
         (defun add(x y)(+ x y)
-        (println (add 3 7) 'cents)  ; -> I own 
+        (println (add 3 7) 'cents)))  ; -> I own 
                                          10 cents
 
 ### Equivalence test operators
@@ -271,12 +271,35 @@ exhaustion error.
 really does is a pointer comparison, so two objects happened to have the same
 contents but actually different are considered to not be the same by `eq`.
 
+### String functions
+
+`string=` compares two strings.
+
+    (string= "Hello" "Hello")    ; -> t
+    (string= "Hello" "World")    ; -> ()
+    
+`string-concat` concatenates strings.
+
+    (string-concat) ;                 -> ""
+    (string-concat "A" "B" "C" "D") ; -> "ABCD"
+
+`symbol->string` turns a symbol into a string.
+    
+    (define sym 'hello)    ; -> hello
+    (symbol->string sym)   ; -> "hello"
+
+`string->symbol` turns a string into a symbol of the same name.
+
+    (string->symbol "hello")   ; -> hello
+
 ### Output operators
 
-`println` prints a given object to the standard output.
+`print` prints a given object to the standard output.
 
-    (println 3)               ; prints "3"
-    (println '(hello world))  ; prints "(hello world)"
+    (print 3)               ; prints "3"
+    (print '(hello world))  ; prints "(hello world)"
+
+`println` does the same, adding a return at the end.
 
 ### Definitions
 
