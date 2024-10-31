@@ -230,7 +230,7 @@ static Obj *read_expr(void *root) {
 static void print(Obj *obj) {
     switch (obj->type) {
     case TCELL:
-        fputs("(", stdout);
+        fputc('(', stdout);
         for (;;) {
             print(obj->car);
             if (obj->cdr == Nil)
@@ -240,10 +240,10 @@ static void print(Obj *obj) {
                 print(obj->cdr);
                 break;
             }
-            fputs(" ", stdout);
+            fputc(' ', stdout);
             obj = obj->cdr;
         }
-        fputs(")", stdout);
+        fputc(')', stdout);
         break;
 
     case TINT   : printf("%lld", obj->value);
@@ -258,7 +258,7 @@ static void print(Obj *obj) {
         break;
     case TMOVED : fputs("<moved>", stdout);
         break;
-    case TTRUE  : fputs("t", stdout);
+    case TTRUE  : fputc('t', stdout);
         break;
     case TNIL   : fputs("()", stdout);
         break;
@@ -663,8 +663,16 @@ static Obj *prim_or(void *root, Obj **env, Obj **list) {
     return car;
 }
 
+extern void process_file(char *fname, Obj **env, Obj **expr);
+
 static Obj *prim_load(void *root, Obj **env, Obj **list) {
-    extern size_t read_file(char *fname, char **text);
+    DEFINE1(expr);
+    Obj *args = eval_list(root, env, list);
+    if (args->car->type != TSYMBOL){
+        error("load: filename must be a symbol");
+    }
+    char *name = args->car->name;
+    process_file(name, env, expr );
 }
 
 static Obj *prim_exit(void *root, Obj **env, Obj **list) {
@@ -739,12 +747,19 @@ static Obj *prim_macroexpand(void *root, Obj **env, Obj **list) {
     return macroexpand(root, env, body);
 }
 
-// (println expr)
-static Obj *prim_println(void *root, Obj **env, Obj **list) {
+// (print expr)
+static Obj *prim_print(void *root, Obj **env, Obj **list) {
     DEFINE1(tmp);
     *tmp = (*list)->car;
     print(eval(root, env, tmp));
-    printf("\n");
+    return Nil;
+}
+
+
+// (println expr)
+static Obj *prim_println(void *root, Obj **env, Obj **list) {
+    prim_print(root, env, list);
+    fputc('\n', stdout);
     return Nil;
 }
 
@@ -832,6 +847,7 @@ static void define_primitives(void *root, Obj **env) {
     add_primitive(root, env, "lambda", prim_lambda);
     add_primitive(root, env, "if", prim_if);
     add_primitive(root, env, "progn", prim_progn);
+    add_primitive(root, env, "print", prim_print);
     add_primitive(root, env, "println", prim_println);
     add_primitive(root, env, "load", prim_load);
     add_primitive(root, env, "exit", prim_exit);

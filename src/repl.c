@@ -182,8 +182,8 @@ int main(int argc, char **argv) {
     DEFINE2(env, expr);
     init_minilisp(env);
 
-    if (argc > 1) {
-       process_file(argv[1], env, expr);
+    for (int i = 1; i < argc; i++) {
+       process_file(argv[i], env, expr);
     }
 
     /* Set the completion callback. This will be called every time the
