@@ -2,14 +2,17 @@ MiniLisp with REPL
 ==================
 
 Foreword by N. Janin:
-This is my attempt at making rui314' MiniLisp slightly more user friendly.
+This is my attempt at making Rui Ueyama (rui314)'s MiniLisp slightly more user friendly and powerful.
 Not being limited by the 1000 lines challenge, I've added a few basic primitives 
 to the original program, while trying to keep the goal of simplicity and conciseness.
-Namely operators >, >=, <=, or, and, not, and function length.
-This has the side effect of being faster as well, since these primitives are compiled 
+The whole program compiles to less than 100 kb and should be able to run on low powered devices.
+The added primitives:
+* operators >, >=, <=, or, and, not,
+* functions length, reverse, progn, load.
+This has the side effect of being much faster as well, since all these primitives are compiled 
 instead of being interpreted.
 
-Among the bells and whistles, I've added a REPL based on jart's bestline.
+Among the bells and whistles, I've added a REPL based on Justine Tunney (jart)'s bestline.
 
 ## Shortcuts
 
@@ -71,6 +74,21 @@ by one.
 
 
 Original README
+=======
+This file is loaded at startup, so one can recall previous commands.
+
+Future improvements:
+- floating point numbers
+- strings ?
+- data files
+
+Known bugs:
+* the paste function does not work well.
+* recall of multiline commands does not work as expected. 
+
+
+Original README (completed)
+>>>>>>> master
 ---------------
 
 One day I wanted to see what I can do with 1k lines of C and
@@ -158,6 +176,13 @@ car.
     (setcar cell 'x)
     cell  ; -> (x . b)
 
+`length` and `reverse` operate on a whole list. They can also operate on their arguments.
+
+    (length '(1 2 3)) ; -> 3
+    (length 1 2 t) ; -> 3
+    (reverse '(a b c)) ; -> (c b a)
+    (reverse '(a) b c) ; -> (c b (a))
+
 ### Numeric operators
 
 `+` returns the sum of the arguments.
@@ -188,6 +213,28 @@ the second.
     (< 3 3)    ; -> ()
     (< 4 3)    ; -> ()
 
+The other comparison operators `>`, `<=`, `>=` work in a similar fashion.
+
+`and` takes two or more arguments, evaluates them, and returns the last argument
+that returns true, if all the arguments return true, or () otherwise.
+
+    (and 1 t 2)         ; -> 2
+    (and 1 t (- 3 4))   ; -> -1
+    (and 1 () 2)        ; -> ()
+    (and)               ; t
+
+`or` takes two or more arguments, evaluates them, and returns the first argument
+that returns true.
+
+    (or 1 () 2)  ; -> 1
+    (or () ())   ; -> ()
+    (or)         ; -> ()
+
+NB: because all the arguments are evaluated, `and` and `or` do not operate like 
+their counterparts written in Lisp, as those stop evaluation at the first argument
+that returns. If the arguments have side effects, this may affect the program 
+differently.
+
 ### Conditionals
 
 `(if cond then else)` is the only conditional in the language. It first
@@ -203,6 +250,15 @@ If you are familiar with Scheme, you might be wondering if you could write a
 loop by tail recursion in MiniLisp. The answer is no. Tail calls consume stack
 space in MiniLisp, so a loop written as recursion will fail with the memory
 exhaustion error.
+
+### Imperative programming
+
+`progn` executes several expressions consecutively.
+
+    (progn (println 'I 'own) 
+        (defun add(x y)(+ x y)
+        (println (add 3 7) 'cents)  ; -> I own 
+                                         10 cents
 
 ### Equivalence test operators
 
@@ -271,6 +327,15 @@ is not defined.
 
     (define val (+ 3 5))
     (setq val (+ val 1))  ; increment "val"
+
+### system functions
+`load` loads a Lisp file and evaluates all its content, adding it to the environment.
+
+    (load 'example/nqueens.lisp) -> run the file and store its evaluated functions and macros
+
+`exit` quits the interpreter and returns integer passed as parameter.
+
+    (exit 0) -> quit with success
 
 ### Macros
 

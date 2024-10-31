@@ -9,22 +9,6 @@
 #include "gc.h"
 #include "minilisp.h"
 
-#if 0
-// should be ~50kb statically linked
-// will save history to ~/.foo_history
-// cc -fno-jump-tables -Os -o foo foo.c bestline.c
-int main() {
-    char *line;
-    while ((line = bestlineWithHistory("IN> ", "foo"))) {
-        fputs("OUT> ", stdout);
-        fputs(line, stdout);
-        fputs("\n", stdout);
-        free(line);
-    }
-}
-#endif
-
-
 int ends_with(const char *str, const char *suffix)
 {
     if (!str || !suffix)
@@ -65,9 +49,9 @@ char *hints(const char *buf, const char **ansi1, const char **ansi2) {
     return NULL;
 }
 
-void minilisp() {
+void minilisp(char *text, size_t length) {
 
-    DEFINE1(env);
+    DEFINE2(env, expr);
     init_minilisp(env);
 
     if(text != NULL){
@@ -90,8 +74,7 @@ void minilisp() {
      *
      * The typed string is returned as a malloc() allocated string by
      * bestline, so the user needs to free() it. */
-    int promptnum = 1;
-    for(;;promptnum++) {
+   for(int promptnum = 1;;promptnum++) {
         char prompt[15] = "";
         sprintf(prompt, "%d:", promptnum);
         char *line = bestline(prompt);
@@ -120,7 +103,7 @@ void minilisp() {
         } else if (line[0] == '/') {
             fputs("Unreconized command: ", stdout);
             fputs(line, stdout);
-            fputs("\n", stdout);
+           putchar('\n');
         }
 
         free(line);
@@ -132,25 +115,75 @@ void minilisp() {
 
 __attribute((noreturn)) void error(char *fmt, ...);
 
-int main(int argc, char **argv) {
+static size_t read_file(char *fname, char **text) {
+    size_t length = 0;
+    FILE *f = fopen(fname, "r");
+    if (!f) {
+        error("Failed to load file %s", fname);
+        return 0;
+    }
 
-   bool no_hist = false;
+    fseek(f, 0, SEEK_END);
+    length = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    
+    *text = malloc(length + 1);
+    if (!*text) {
+        error("Out of memory.");
+        fclose(f);
+        return 0;
+    }
+
+    size_t read = fread(*text, 1, length, f);
+    if (read != length) {
+        error("Failed to read entire file");
+        free(*text);
+        *text = NULL;
+        fclose(f);
+        return 0;
+    }
+
+    (*text)[length] = '\0';
+    fclose(f);
+    return length;
+}
+
+void process_file(char *fname, Obj **env, Obj **expr) {
+    char *text;
+    size_t len = read_file(fname, &text);
+    if (len == 0) return;
+
+    // Save old stdin
+    FILE *old_stdin = stdin;
+    // Create a single stream for the entire file
+    FILE *stream = fmemopen(text, len, "r");
+    if (!stream) {
+        free(text);
+        error("Failed to create memory stream");
+        return;
+    }
+
+    // Redirect stdin to the memory stream
+    stdin = stream;
+
+    // Process expressions until we reach end of file
+    while (!feof(stream)) {
+        eval_input(text, env, expr);
+    }
+
+    // Cleanup
+    stdin = old_stdin;
+    fclose(stream);
+    free(text);
+}
+
+int main(int argc, char **argv) {
 
     DEFINE2(env, expr);
     init_minilisp(env);
 
     if (argc > 1) {
-        for (int i = 1; i <= argc; ++i){
-            char *arg = argv[i];
-            if (strcmp(arg, "--no-history") == 0){
-                no_hist = true;
-            }
-            else if ((strcmp(arg, "--exec") == 0) || (strcmp(arg, "--exec")) == 0){ 
-
-            }
-            else
-                process_file(arg, env, expr);
-        }
+       process_file(argv[1], env, expr);
     }
 
     /* Set the completion callback. This will be called every time the
@@ -160,11 +193,9 @@ int main(int argc, char **argv) {
 
     /* Load history from file. The history file is just a plain text file
      * where entries are separated by newlines. */
-    if (!no_hist) {
-        bestlineHistoryLoad("history.txt"); /* Load the history at startup */
-    }
+    bestlineHistoryLoad("history.txt"); /* Load the history at startup */
 
-    minilisp();
-        
+    minilisp(NULL, 0);
+
     return 0;
 }
