@@ -108,6 +108,12 @@ static int peek(void) {
     return c;
 }
 
+void swap(char *left, char *right) {
+    char tmp = *left;
+    *left = *right;
+    *right = tmp;
+}
+
 // Destructively reverses the given list.
 static Obj *reverse(Obj *p) {
     Obj *ret = Nil;
@@ -299,7 +305,7 @@ static void print(Obj *obj) {
     case TSTRING:
         fputc('"', stdout);
         for (char *p = obj->name; *p; p++) {
-            if (*p == '"') printf("\\\"");
+            if (*p == '"') fputs("\\\"", stdout);
             else if (*p == '\n') fputc('\n', stdout);
             else if (*p == '\t') fputc('\t', stdout);
             else if (*p == '\r') fputc('\r', stdout);
@@ -310,6 +316,7 @@ static void print(Obj *obj) {
     default:
         error("Bug: print: Unknown tag type: %d", obj->type);
     }
+    fflush(stdout);
 }
 
 // Returns the length of the given list. -1 if it's not a proper list.
@@ -399,8 +406,27 @@ static Obj *apply(void *root, Obj **env, Obj **fn, Obj **args) {
 }
 
 // Searches for a variable by symbol. Returns null if not found.
+/* An environment consists of a pointer to its parent environment (if any) and
+ * two parallel lists - vars and vals.
+ *
+ * Case 1 - vars is a regular list:
+ *   vars: (a b c), vals: (1 2 3)        ; a = 1, b = 2, c = 3
+ *
+ * Case 2 - vars is a dotted list:
+ *   vars: (a b . c), vals: (1 2)        ; a = 1, b = 2, c = nil
+ *   vars: (a b . c), vals: (1 2 3)      ; a = 1, b = 2, c = (3)
+ *   vars: (a b . c), vals: (1 2 3 4 5)  ; a = 1, b = 2, c = (3 4 5)
+ *
+ * Case 3 - vars is a symbol:
+ *   vars: a, vals: nil                  ; a = nil
+ *   vars: a, vals: (1)                  ; a = (1)
+ *   vars: a, vals: (1 2 3)              ; a = (1 2 3)
+ *
+ * Case 4 - vars and vals are both nil:
+ *   vars: nil, vals: nil
+ */
 static Obj *find(Obj **env, Obj *sym) {
-    for (Obj *p = *env; p != Nil; p = p->up) {
+    for (Obj *p = *env; p != Nil; p = p->up) { // search all environments
         for (Obj *cell = p->vars; cell != Nil; cell = cell->cdr) {
             Obj *bind = cell->car;
             if (sym == bind->car)
@@ -468,6 +494,12 @@ static Obj *prim_quote(void *root, Obj **env, Obj **list) {
     if (length(*list) != 1)
         error("Malformed quote");
     return (*list)->car;
+}
+
+static Obj *prim_atom(void *root, Obj **env, Obj **list) {
+    if (length(*list) != 1)
+        error("atom takes ontly 1 argument");
+    return ((*list)->car->type != TCELL) ? True : Nil;
 }
 
 // (cons expr expr)
@@ -540,20 +572,26 @@ static Obj *prim_gensym(void *root, Obj **env, Obj **list) {
   return make_symbol(root, buf);
 }
 
-// (length <cell> | ...)
+// (length <cell> | length <string> | length ...)
 static Obj *prim_length(void *root, Obj **env, Obj **list) {
     Obj *args = eval_list(root, env, list);
     int len = length(args);
-    if (len != 1) {
-        // number of arguments to length
+    if (len == 1) {
+        Obj *car = args->car;
+        if (car != Nil) { 
+            if (car->type == TSTRING) {
+                len = strlen(car->name);
+            }
+            else if (car->type == TCELL) {
+                for (len = 0; car != Nil && car->type == TCELL; car = car->cdr) 
+                    len++;
+            }
+            else {
+                error("When length has a single argument, it must be a list or a string");
+            }
+        }
     }
-    else {
-        Obj *lst = args->car;
-        if (lst != Nil && lst->type != TCELL)
-            error("When length has a single argument, it must be a list");
-        for (len = 0; lst != Nil && lst->type == TCELL; lst = lst->cdr) 
-            len++;
-    }
+
     return make_int(root, len);
 }
 
@@ -561,15 +599,28 @@ static Obj *prim_length(void *root, Obj **env, Obj **list) {
 static Obj *prim_reverse(void *root, Obj **env, Obj **list) {
     Obj *args = eval_list(root, env, list);
     int len = length(args);
-    if (len > 1) {
-        // reverse the arguments to reverse
+    if (len != 1) {
         return reverse(args);
     }
-    else { // reverse a list
-        Obj *lst = args->car;
-        if (lst != Nil && lst->type != TCELL)
-            error("Argument to reverse must be a list");
-        return reverse(lst);
+    else { 
+        Obj *car = args->car;
+        if (car != Nil) { 
+            if (car->type == TCELL) {
+                return reverse(car);
+            }
+            else if(car->type == TSTRING){
+                char *left = car->name, 
+                     *right = left + strlen(car->name) - 1;
+                while (left <= right) {
+                    swap(left, right);
+                    left++, right--;
+                }
+            }
+            else {
+                error("When reverse has a single argument, it must be a list");
+            }
+        }
+        return car;
     }
 }
 
@@ -633,53 +684,24 @@ static Obj *prim_minus(void *root, Obj **env, Obj **list) {
     return make_int(root, r);
 }
 
-// (< <integer> <integer>)
-static Obj *prim_lt(void *root, Obj **env, Obj **list) {
-    Obj *args = eval_list(root, env, list);
-    if (length(args) != 2)
-        error("malformed <");
-    Obj *x = args->car;
-    Obj *y = args->cdr->car;
-    if (x->type != TINT || y->type != TINT)
-        error("< takes only 2 numbers");
-    return x->value < y->value ? True : Nil;
+// (op <integer> <integer>)
+#define PRIM_COMPARISON_OP(PRIM_OP, OP)                     \
+static Obj *PRIM_OP(void *root, Obj **env, Obj **list) {    \
+    Obj *args = eval_list(root, env, list);                 \
+    if (length(args) != 2)                                  \
+        error(#OP " takes only 2 number");                  \
+    Obj *x = args->car;                                     \
+    Obj *y = args->cdr->car;                                \
+    if (x->type != TINT || y->type != TINT)                 \
+        error(#OP " takes only 2 numbers");                 \
+    return x->value OP y->value ? True : Nil;               \
 }
 
-// (> <integer> <integer>)
-static Obj *prim_gt(void *root, Obj **env, Obj **list) {
-    Obj *args = eval_list(root, env, list);
-    if (length(args) != 2)
-        error("malformed >");
-    Obj *x = args->car;
-    Obj *y = args->cdr->car;
-    if (x->type != TINT || y->type != TINT)
-        error("> takes only 2 numbers");
-    return x->value > y->value ? True : Nil;
-}
-
-// (<= <integer> <integer>)
-static Obj *prim_lte(void *root, Obj **env, Obj **list) {
-    Obj *args = eval_list(root, env, list);
-    if (length(args) != 2)
-        error("malformed <=");
-    Obj *x = args->car;
-    Obj *y = args->cdr->car;
-    if (x->type != TINT || y->type != TINT)
-        error("<= takes only 2 numbers");
-    return x->value <= y->value ? True : Nil;
-}
-
-// (>= <integer> <integer>)
-static Obj *prim_gte(void *root, Obj **env, Obj **list) {
-    Obj *args = eval_list(root, env, list);
-    if (length(args) != 2)
-        error("malformed >=");
-    Obj *x = args->car;
-    Obj *y = args->cdr->car;
-    if (x->type != TINT || y->type != TINT)
-        error(">= takes only 2 numbers");
-    return x->value >= y->value ? True : Nil;
-}
+PRIM_COMPARISON_OP(prim_num_eq, ==)
+PRIM_COMPARISON_OP(prim_lt, <)
+PRIM_COMPARISON_OP(prim_lte, <=)
+PRIM_COMPARISON_OP(prim_gt, >)
+PRIM_COMPARISON_OP(prim_gte, >=)
 
 // (not <cell>)
 static Obj *prim_not(void *root, Obj **env, Obj **list) {
@@ -829,18 +851,6 @@ static Obj *prim_if(void *root, Obj **env, Obj **list) {
     return *els == Nil ? Nil : progn(root, env, els);
 }
 
-// (= <integer> <integer>)
-static Obj *prim_num_eq(void *root, Obj **env, Obj **list) {
-    if (length(*list) != 2)
-        error("Malformed =");
-    Obj *values = eval_list(root, env, list);
-    Obj *x = values->car;
-    Obj *y = values->cdr->car;
-    if (x->type != TINT || y->type != TINT)
-        error("= only takes numbers");
-    return x->value == y->value ? True : Nil;
-}
-
 // (eq expr expr)
 static Obj *prim_eq(void *root, Obj **env, Obj **list) {
     if (length(*list) != 2)
@@ -969,6 +979,7 @@ static void define_primitives(void *root, Obj **env) {
     add_primitive(root, env, "defmacro", prim_defmacro);
     add_primitive(root, env, "macroexpand", prim_macroexpand);
     add_primitive(root, env, "lambda", prim_lambda);
+    add_primitive(root, env, "atom", prim_atom);
     add_primitive(root, env, "if", prim_if);
     add_primitive(root, env, "progn", prim_progn);
     add_primitive(root, env, "print", prim_print);

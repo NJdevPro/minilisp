@@ -181,12 +181,16 @@ car.
     (setcar cell 'x)
     cell  ; -> (x . b)
 
-`length` and `reverse` operate on a whole list. They can also operate on their arguments.
+`length` and `reverse` operate on a whole list or a on string.
+They can also operate on their arguments when their number is > 1.
 
-    (length '(1 2 3)) ; -> 3
-    (length 1 2 t) ; -> 3
-    (reverse '(a b c)) ; -> (c b a)
-    (reverse '(a) b c) ; -> (c b (a))
+    (length '(1 2 3))   ; -> 3
+    (length 1 2 t)      ; -> 3
+    (length "1 2 3")    ; -> 5
+
+    (reverse '(a b c))  ; -> (c b a)
+    (reverse "1234")    ; -> "4321" 
+    (reverse '(a) b "c")  ; -> ("c" b (a))
 
 ### Numeric operators
 
@@ -356,7 +360,15 @@ is not defined.
     (define val (+ 3 5))
     (setq val (+ val 1))  ; increment "val"
 
-### system functions
+### Introspection
+
+`atom` returns () if the argument is a cell, t otherwise.
+
+    (atom '(a b))   ; -> ()
+    (atom "")       ; -> t
+    (atom ())       ; -> t
+    
+### System functions
 `load` loads a Lisp file and evaluates all its content, adding it to the environment.
 
     (load 'example/nqueens.lisp) -> run the file and store its evaluated functions and macros
