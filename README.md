@@ -2,22 +2,29 @@ MiniLisp with REPL
 ==================
 
 Foreword by N. Janin:
-This is my attempt at making Rui Ueyama (rui314)'s MiniLisp slightly more user friendly and powerful.
-Not being limited by the 1000 lines challenge, I've added a few basic primitives 
+This is my attempt at making Rui Ueyama (rui314)'s MiniLisp slightly more user friendly 
+and powerful.
+Not being limited by the 1000 lines challenge, I've added a number of basic primitives 
 to the original program, while trying to keep the goal of simplicity and conciseness.
+The whole program compiles to less than 100 kb without debugging symbols and should be 
+able to run on low powered devices.
+
 The whole program compiles to less than 100 kb and should be able to run on low powered devices.
 The added primitives:
-* operators >, >=, <=, or, and, not,
+* strings
+* predicates >, >=, <=, or, and, not,
 * functions length, reverse, progn, load.
-This has the side effect of being much faster as well, since all these primitives are compiled 
-instead of being interpreted.
+
+This has the side effect of being much faster as well, since all these primitives are 
+compiled instead of being interpreted.
 
 Among the bells and whistles, I've added a REPL based on Justine Tunney (jart)'s bestline.
 
 In this version, instead of passing a file using pipes, you simply pass the files as command parameters :
 ./minilisp f1 f2 etc
 
-The files all share the same environment, so all the symbols, functions and macros defined in f1 can be reused in the following files. 
+The files all share the same environment, so all the symbols, functions and macros defined 
+in f1 can be reused in the following files. 
 
 ## Shortcuts
 
@@ -93,7 +100,6 @@ Known bugs:
 
 
 Original README (completed)
->>>>>>> master
 ---------------
 
 One day I wanted to see what I can do with 1k lines of C and
@@ -181,8 +187,8 @@ car.
     (setcar cell 'x)
     cell  ; -> (x . b)
 
-`length` and `reverse` operate on a whole list or a on string.
-They can also operate on their arguments when their number is > 1.
+`length` and `reverse` operate on a whole list or a string. They can also operate on their 
+arguments when their number is > 1.
 
     (length '(1 2 3))   ; -> 3
     (length 1 2 t)      ; -> 3
@@ -222,7 +228,7 @@ the second.
     (< 3 3)    ; -> ()
     (< 4 3)    ; -> ()
 
-The other comparison operators `>`, `<=`, `>=` work in a similar fashion.
+The other numerical predicates `>`, `<=`, `>=` work in a similar fashion.
 
 `and` takes two or more arguments, evaluates them, and returns the last argument
 that returns true, if all the arguments return true, or () otherwise.
@@ -239,10 +245,10 @@ that returns true.
     (or () ())   ; -> ()
     (or)         ; -> ()
 
-NB: because all the arguments are evaluated, `and` and `or` do not operate like 
-their counterparts written in Lisp, as those stop evaluation at the first argument
-that returns. If the arguments have side effects, this may affect the program 
-differently.
+Nota Bene: because all the arguments are evaluated, `and` and `or` do not operate  
+like their counterparts written in Lisp, as those stop evaluation at the first 
+argument that returns. If the arguments have side effects, this may affect the 
+program differently.
 
 ### Conditionals
 
@@ -262,12 +268,11 @@ exhaustion error.
 
 ### Imperative programming
 
-`progn` executes several expressions consecutively.
+`(progn expr expr ...)` executes several expressions in sequence.
 
-    (progn (print 'I 'own) 
-        (defun add(x y)(+ x y)
-        (println (add 3 7) 'cents)))  ; -> I own 
-                                         10 cents
+    (progn (print "I own ") 
+        (defun add(x y)(+ x y))
+        (println (add 3 7) " cents"))  ; -> prints "I own 10 cents"
 
 ### Equivalence test operators
 
@@ -284,7 +289,7 @@ contents but actually different are considered to not be the same by `eq`.
     
 `string-concat` concatenates strings.
 
-    (string-concat) ;                 -> ""
+    (string-concat)                 ; -> ""
     (string-concat "A" "B" "C" "D") ; -> "ABCD"
 
 `symbol->string` turns a symbol into a string.
@@ -300,8 +305,9 @@ contents but actually different are considered to not be the same by `eq`.
 
 `print` prints a given object to the standard output.
 
-    (print 3)               ; prints "3"
-    (print '(hello world))  ; prints "(hello world)"
+    (print 3)               ; -> "3"
+    (print '(hello world))  ; -> "(hello world)"
+    (print "hello" "world") ; -> "hello world"
 
 `println` does the same, adding a return at the end.
 
@@ -371,9 +377,10 @@ is not defined.
 ### System functions
 `load` loads a Lisp file and evaluates all its content, adding it to the environment.
 
-    (load 'example/nqueens.lisp) -> run the file and store its evaluated functions and macros
+    (load "example/nqueens.lisp") -> run the file and store its evaluated functions
+                                     and macros
 
-`exit` quits the interpreter and returns integer passed as parameter.
+`exit` quits the interpreter and returns the integer passed as parameter.
 
     (exit 0) -> quit with success
 

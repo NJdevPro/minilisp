@@ -303,7 +303,6 @@ static void print(Obj *obj) {
     case TNIL   : fputs("()", stdout);
         break;
     case TSTRING:
-        fputc('"', stdout);
         for (char *p = obj->name; *p; p++) {
             if (*p == '"') fputs("\\\"", stdout);
             else if (*p == '\n') fputc('\n', stdout);
@@ -311,7 +310,6 @@ static void print(Obj *obj) {
             else if (*p == '\r') fputc('\r', stdout);
             else fputc(*p, stdout);
         }
-        fputc('"', stdout);
         break;
     default:
         error("Bug: print: Unknown tag type: %d", obj->type);
@@ -816,16 +814,16 @@ static Obj *prim_macroexpand(void *root, Obj **env, Obj **list) {
     return macroexpand(root, env, body);
 }
 
-// (print expr)
+// (print ...)
 static Obj *prim_print(void *root, Obj **env, Obj **list) {
-    DEFINE1(tmp);
-    *tmp = (*list)->car;
-    print(eval(root, env, tmp));
+    for (Obj *args = *list; args != Nil; args = args->cdr) {
+        print(eval(root, env, &(args->car)));
+    }
     return Nil;
 }
 
 
-// (println expr)
+// (println ...)
 static Obj *prim_println(void *root, Obj **env, Obj **list) {
     prim_print(root, env, list);
     fputc('\n', stdout);
@@ -1012,15 +1010,24 @@ void init_minilisp(Obj **env) {
 
 int eval_input(char *input, Obj **env, Obj **expr) {
     if (setjmp(context) == 0){
-        *expr = read_expr(input);
-        if (!*expr)
-            return 0;
-        if (*expr == Cparen)
-            error("Stray close parenthesis");
-        if (*expr == Dot)
-            error("Stray dot");
-        print(eval(root, env, expr));
-        puts("");
+        Obj *result = NULL;
+        while (true) {
+            *expr = read_expr(root);            
+            if (!*expr) 
+                break;
+                
+            if (*expr == Cparen)
+                error("Stray close parenthesis");
+            if (*expr == Dot)
+                error("Stray dot");
+                
+            result = eval(root, env, expr);
+        }
+        
+        if (result) {
+            print(result);
+        }
+        
         return 0;
     }
     else return 1;

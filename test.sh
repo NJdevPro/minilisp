@@ -7,13 +7,13 @@ function fail() {
 }
 
 function do_run() {
-  error=$(echo "$3" | ./minilisp 2>&1 > /dev/null)
+  error=$(./minilisp -r -x "$3" 2>&1 > /dev/null)
   if [ -n "$error" ]; then
     echo FAILED
     fail "$error"
   fi
 
-  result=$(echo "$3" | ./minilisp 2> /dev/null | tail -1)
+  result=$(./minilisp -r -x "$3" 2> /dev/null | tail -1)
   if [ "$result" != "$2" ]; then
     echo FAILED
     fail "$2 expected, but got $result"
@@ -48,28 +48,6 @@ run 'unary -' -3 '(- 3)'
 run '-' -2 '(- 3 5)'
 run '-' -9 '(- 3 5 7)'
 
-run '<' t '(< 2 3)'
-run '<' '()' '(< 3 3)'
-run '<' '()' '(< 4 3)'
-
-run '>' t '(> 3 2)'
-run '>' t '(> 3 -1)'
-run '>' '()' '(> 3 3)'
-run '>' '()' '(> 2 3)'
-run '>' 't' '(> 4 3)'
-
-run '>=' 't' '(>= 3 2)'
-run '>=' 't' '(>= 3 -1)'
-run '>=' 't' '(>= 3 3)'
-run '>=' '()' '(>= 2 3)'
-run '>=' 't' '(>= 4 3)'
-
-run '<=' '()' '(<= 3 2)'
-run '<=' '()' '(<= 3 -1)'
-run '<=' 't' '(<= 3 3)'
-run '<=' 't' '(<= 2 3)'
-run '<=' '()' '(<= 4 3)'
-
 run 'not' '()' '(not t)'
 run 'not' '()' '(not 1)'
 run 'not' 't' '(not ())'
@@ -97,14 +75,29 @@ run cdr "(b c)" "(cdr '(a b c))"
 
 run setcar "(x . b)" "(define obj (cons 'a 'b)) (setcar obj 'x) obj"
 
-run length 0 "(length '())"
-run length 2 "(length '(()()))"
+run length 0 "(length)"
+run length 1 "(length '())"
+run length 2 "(length '(()t))"
 run length 3 "(length '(1 () 3))"
+run length 0 "(length \"\")"
+run length 5 "(length \"1 2 3\")"
+run length 3 "(length '(a) t 42)"
+
+run reverse "()" "(reverse)"
+run reverse "(c b a)" "(reverse '(a b c))"
+run reverse "(t c (a . b))" "(reverse '((a . b) c t))"
+run reverse "4321" "(reverse \"1234\")"
+run reverse "(c b a)" "(reverse \"a\" \"b\" \"c\")"
 
 # Comments
 run comment 5 "
   ; 2
   5 ; 3"
+
+# Introspection
+run atom '()' "(atom '(a b))"
+run atom t    "(atom \"\")"  
+run atom t    "(atom ())"    
 
 # Global variables
 run define 7 '(define x 7) x'
@@ -125,6 +118,28 @@ run if c "(if () 'a 'b 'c)"
 # Numeric comparisons
 run = t '(= 3 3)'
 run = '()' '(= 3 2)'
+
+run '<' t '(< 2 3)'
+run '<' '()' '(< 3 3)'
+run '<' '()' '(< 4 3)'
+
+run '>' t '(> 3 2)'
+run '>' t '(> 3 -1)'
+run '>' '()' '(> 3 3)'
+run '>' '()' '(> 2 3)'
+run '>' 't' '(> 4 3)'
+
+run '>=' 't' '(>= 3 2)'
+run '>=' 't' '(>= 3 -1)'
+run '>=' 't' '(>= 3 3)'
+run '>=' '()' '(>= 2 3)'
+run '>=' 't' '(>= 4 3)'
+
+run '<=' '()' '(<= 3 2)'
+run '<=' '()' '(<= 3 -1)'
+run '<=' 't' '(<= 3 3)'
+run '<=' 't' '(<= 2 3)'
+run '<=' '()' '(<= 4 3)'
 
 # eq
 run eq t "(eq 'foo 'foo)"
@@ -161,6 +176,10 @@ run counter 3 '
 (counter)
 (counter)
 (counter)'
+
+#run progn 'I own 10 cents' '(progn (print "I own ") 
+#                              (defun add(x y)(+ x y))
+#                              (println (add 3 7) " cents"))'
 
 # While loop
 run while 45 "
