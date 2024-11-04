@@ -11,12 +11,16 @@
 #include <string.h>
 #include "minilisp.h"
 #include "gc.h"
+#include "repl.h"
 
 jmp_buf context;
 
-__attribute((noreturn)) void error(char *fmt, ...) {
+extern filepos_t filepos;
+
+void error(char *fmt, ...) {
     va_list ap;
     va_start(ap, fmt);
+    fprintf(stderr, "%s %d: ", filepos.filename, filepos.line_num);
     vfprintf(stderr, fmt, ap);
     fprintf(stderr, "\n");
     va_end(ap);
@@ -100,7 +104,7 @@ static Obj *acons(void *root, Obj **x, Obj **y, Obj **a) {
 #define SYMBOL_MAX_LEN 200
 const char symbol_chars[] = "~!@#$%^&*-_=+:/?<>";
 
-static Obj *read_expr(void *root);
+static Obj *read_expr(void *root, bool is_top_level);
 
 static int peek(void) {
     char c = getchar();
@@ -130,8 +134,10 @@ static Obj *reverse(Obj *p) {
 static void skip_line(void) {
     for (;;) {
         char c = getchar();
-        if (c == EOF || c == '\n')
+        if (c == EOF || c == '\n'){
+            filepos.line_num++;
             return;
+        }
         if (c == '\r') {
             if (peek() == '\n')
                 getchar();
@@ -145,14 +151,14 @@ static Obj *read_list(void *root) {
     DEFINE3(obj, head, last);
     *head = Nil;
     for (;;) {
-        *obj = read_expr(root);
+        *obj = read_expr(root, false);
         if (!*obj)
             error("Unclosed parenthesis");
         if (*obj == Cparen)
             return reverse(*head);
         if (*obj == Dot) {
-            *last = read_expr(root);
-            if (read_expr(root) != Cparen)
+            *last = read_expr(root, false);
+            if (read_expr(root, false) != Cparen)
                 error("Closed parenthesis expected after dot");
             Obj *ret = reverse(*head);
             (*head)->cdr = *last;
@@ -178,7 +184,7 @@ static Obj *intern(void *root, char *name) {
 static Obj *read_quote(void *root) {
     DEFINE2(sym, tmp);
     *sym = intern(root, "quote");
-    *tmp = read_expr(root);
+    *tmp = read_expr(root, false);
     *tmp = cons(root, tmp, &Nil);
     *tmp = cons(root, sym, tmp);
     return *tmp;
@@ -235,10 +241,15 @@ static Obj *read_string(void *root) {
     return make_string(root, buf);
 }
 
-static Obj *read_expr(void *root) {
+static Obj *read_expr(void *root, bool is_top_level) {
     for (;;) {
         char c = getchar();
-        if (c == ' ' || c == '\n' || c == '\r' || c == '\t')
+        if (c == '\n') {
+            if (is_top_level) filepos.line_num++;
+            if (peek() == '\r');
+            continue;
+        }
+        if (c == ' ' || c == '\r' || c == '\t')
             continue;
         if (c == EOF)
             return NULL;
@@ -314,7 +325,7 @@ static void print(Obj *obj) {
     default:
         error("Bug: print: Unknown tag type: %d", obj->type);
     }
-    fflush(stdout);
+    //puts("");
 }
 
 // Returns the length of the given list. -1 if it's not a proper list.
@@ -738,7 +749,17 @@ static Obj *prim_load(void *root, Obj **env, Obj **list) {
         error("load: filename must be a string");
     }
     char *name = args->car->name;
-    process_file(name, env, expr );
+    
+    // Save old context and set up new one for error handling
+    jmp_buf old_context;
+    memcpy(&old_context, &context, sizeof(jmp_buf));
+    
+    if (setjmp(context) == 0) {
+        process_file(name, env, expr);
+    }
+    
+    // Restore old context
+    memcpy(&context, &old_context, sizeof(jmp_buf));
     return Nil;
 }
 
@@ -773,8 +794,8 @@ static Obj *prim_lambda(void *root, Obj **env, Obj **list) {
 }
 
 static Obj *handle_defun(void *root, Obj **env, Obj **list, int type) {
-    if ((*list)->car->type != TSYMBOL || (*list)->cdr->type != TCELL)
-        error("Malformed defun");
+    if (length(*list) < 3 || (*list)->car->type != TSYMBOL || (*list)->cdr->type != TCELL)
+        error("Malformed defun: correct form is (defun <symbol> (<symbol> ...) expr ...)");
     DEFINE3(fn, sym, rest);
     *sym = (*list)->car;
     *rest = (*list)->cdr;
@@ -1012,7 +1033,7 @@ int eval_input(char *input, Obj **env, Obj **expr) {
     if (setjmp(context) == 0){
         Obj *result = NULL;
         while (true) {
-            *expr = read_expr(root);            
+            *expr = read_expr(root, true);         
             if (!*expr) 
                 break;
                 
@@ -1026,6 +1047,7 @@ int eval_input(char *input, Obj **env, Obj **expr) {
         
         if (result) {
             print(result);
+            putc('\n', stdout);
         }
         
         return 0;

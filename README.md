@@ -196,7 +196,7 @@ arguments when their number is > 1.
 
     (reverse '(a b c))  ; -> (c b a)
     (reverse "1234")    ; -> "4321" 
-    (reverse '(a) b "c")  ; -> ("c" b (a))
+    (reverse '((a) b "c")  ; -> ("c" b (a))
 
 ### Numeric operators
 

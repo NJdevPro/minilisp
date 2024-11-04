@@ -7,6 +7,7 @@
 #include "../bestline/bestline.h"
 #include "ketopt.h"
 #include "gc.h"
+#include "repl.h"
 #include "minilisp.h"
 
 int ends_with(const char *str, const char *suffix)
@@ -49,8 +50,12 @@ char *hints(const char *buf, const char **ansi1, const char **ansi2) {
     return NULL;
 }
 
+// This struct keeps track of the current file/line being evaluated
+filepos_t filepos = {"", 0, 0};
+
 void minilisp(char *text, size_t length, bool with_repl, Obj **env, Obj **expr) {
 
+    // Process file
     if(text != NULL){
         // Save old stdin
         FILE * old_stdin = stdin;
@@ -65,53 +70,40 @@ void minilisp(char *text, size_t length, bool with_repl, Obj **env, Obj **expr) 
         fclose(stream);
     }
 
-    int max_iter = (with_repl) ? __INT_MAX__ : 0; 
-    for(int promptnum = 1; promptnum < max_iter; promptnum++) {
-        char prompt[15] = "";
-        sprintf(prompt, "%d:", promptnum);
-        char *line = bestline(prompt);
-        if(line == NULL) continue;
+    // REPL
+    if (with_repl)
+        for(int promptnum = 1;; promptnum++) {
+            char prompt[15] = "";
+            sprintf(prompt, "%d:", promptnum);
+            char *line = bestline(prompt);
+            if(line == NULL) continue;
+            // Save old stdin
+            FILE * old_stdin = stdin;
+            // Open a memory stream
+            FILE * stream = fmemopen(line, strlen(line), "r");
+            // Redirect stdin to the in memory stream in order to use getchar()
+            stdin = stream;
 
-        // Save old stdin
-        FILE * old_stdin = stdin;
-        // Open a memory stream
-        FILE * stream = fmemopen(line, strlen(line), "r");
-        // Redirect stdin to the in memory stream in order to use getchar()
-        stdin = stream;
-
-        usleep(10000);
-        
-        if (line[0] != '\0' && line[0] != '/') {
-            int ok = eval_input(line, env, expr);
-            if (ok == 0) {
+            usleep(10000);
+            
+            if (line[0] != '\0' && line[0] != '/') {
+                eval_input(line, env, expr);
                 bestlineHistoryAdd(line);
                 bestlineHistorySave("history.txt");
+            } else if (line[0] == '/') {
+                fputs("Unreconized command: ", stdout);
+                fputs(line, stdout);
+                putchar('\n');
             }
-        } else if (line[0] == '/') {
-            fputs("Unreconized command: ", stdout);
-            fputs(line, stdout);
-           putchar('\n');
+
+            free(line);
+            // restore stdin
+            stdin = old_stdin;
+            fclose(stream);
         }
-
-        free(line);
-        // restore stdin
-        stdin = old_stdin;
-        fclose(stream);
-    }
 }
 
-__attribute((noreturn)) void error(char *fmt, ...);
-
-// Duplicate a string
-static char *dup_string(const char *str) {
-    const size_t len = strlen(str);
-    char *copy = malloc(len + 1);
-    if (copy){
-        strcpy(copy, str);
-        copy[len] = '\0';
-    }
-    return copy;
-}
+void error(char *fmt, ...);
 
 static size_t read_file(char *fname, char **text) {
     size_t length = 0;
@@ -150,6 +142,10 @@ void process_file(char *fname, Obj **env, Obj **expr) {
     char *text;
     size_t len = read_file(fname, &text);
     if (len == 0) return;
+    
+    filepos.filename = strdup(fname);
+    filepos.file_len = len;
+    filepos.line_num = 0;
 
     // Save old stdin
     FILE *old_stdin = stdin;
@@ -173,11 +169,12 @@ void process_file(char *fname, Obj **env, Obj **expr) {
     stdin = old_stdin;
     fclose(stream);
     free(text);
+    //if (filepos.filename) free(filepos.filename);
 }
 
 static bool no_history = false;
-static int num_args = 0;
 static char *one_liner = NULL;
+static int num_files = 0;
 static char **filenames;
 static bool with_repl = true;
 
@@ -223,7 +220,7 @@ void parse_args(int argc, char **argv) {
 
             case 'x':
             case 300:  // --exec "... lisp code ..."
-                one_liner = dup_string(option.arg);
+                one_liner = strdup(option.arg);
                 break;
 
             case 'H':
@@ -259,10 +256,10 @@ void parse_args(int argc, char **argv) {
     }
 
     // regular arguments: run files
-    filenames = (char **) malloc(argc * sizeof(char *));
-    for (int i = option.ind; i < argc; i++) {
-        filenames[i] = dup_string(argv[i]);
-        printf("Executing %s\n", filenames[i]);
+    num_files = argc - option.ind;
+    filenames = (char **) malloc(num_files * sizeof(char *));
+    for (int i = 1; i <= num_files; i++) {
+        filenames[i-1] = strdup(argv[i]);
     }
 }
 
@@ -273,10 +270,12 @@ int main(int argc, char **argv) {
     DEFINE2(env, expr);
     init_minilisp(env);
 
-    for (int i = 0; i < num_args; i++) {
-        printf("%s", filenames[i]);
-       process_file(filenames[i], env, expr);
+    for (int i = 0; i < num_files; i++) {
+        printf("Loading %s\n", filenames[i]);
+        process_file(filenames[i], env, expr);
+        free(filenames[i]);
     }
+    free(filenames);
 
     /* Set the completion callback. This will be called every time the
      * user uses the <tab> key. */
@@ -292,8 +291,6 @@ int main(int argc, char **argv) {
         fputs("Command history disengaged.", stdout);
     }
 
-
-    //printf("%s\n", one_liner);
     size_t len = one_liner ? strlen(one_liner) : 0;
     minilisp(one_liner, len, with_repl, env, expr);
 
