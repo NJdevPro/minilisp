@@ -11,7 +11,6 @@
 #include <string.h>
 #include "minilisp.h"
 #include "gc.h"
-#include "repl.h"
 
 jmp_buf context;
 
@@ -412,6 +411,7 @@ static Obj *apply(void *root, Obj **env, Obj **fn, Obj **args) {
         return apply_func(root, env, fn, eargs);
     }
     error("not supported");
+    return Nil; //fix warning
 }
 
 // Searches for a variable by symbol. Returns null if not found.
@@ -492,6 +492,7 @@ static Obj *eval(void *root, Obj **env, Obj **obj) {
     default:
         error("Bug: eval: Unknown tag type: %d", (*obj)->type);
     }
+    return Nil; // fix warning
 }
 
 //======================================================================

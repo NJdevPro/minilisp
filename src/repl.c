@@ -7,7 +7,6 @@
 #include "../bestline/bestline.h"
 #include "ketopt.h"
 #include "gc.h"
-#include "repl.h"
 #include "minilisp.h"
 
 int ends_with(const char *str, const char *suffix)

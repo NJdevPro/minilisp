@@ -76,6 +76,11 @@ typedef struct Obj {
     };
 } Obj;
 
+typedef struct {
+    char *filename;
+    size_t file_len;
+    int line_num;
+} filepos_t;
 
 void init_minilisp(Obj **env);
 int eval_input(char *input, Obj **env, Obj **expr);
