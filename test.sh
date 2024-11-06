@@ -164,6 +164,14 @@ run args 15 '(defun f (x y z) (+ x y z)) (f 3 5 7)'
 run restargs '(3 5 7)' '(defun f (x . y) (cons x y)) (f 3 5 7)'
 run restargs '(3)'    '(defun f (x . y) (cons x y)) (f 3)'
 
+# strings
+run string= '()' '(string= "hello" "Hello")'
+run string= t  '(string= "hello" "hello")'
+run 'symbol->string' 'twelve' "
+  (define twelve 12)
+  (symbol->string 'twelve)"
+run 'string->symbol' 'twelve' '(string->symbol "twelve")'
+
 # Lexical closures
 run closure 3 '(defun call (f) ((lambda (var) (f)) 5))
   ((lambda (var) (call (lambda () var))) 3)'
