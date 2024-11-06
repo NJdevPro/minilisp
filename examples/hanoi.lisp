@@ -1,12 +1,5 @@
 (defun list (x . y) (cons x y))
 
-(defun mapc1 (fn xs)
-  (if (= () xs)
-      ()
-      (progn 
-        (fn (car xs)) 
-        (mapc1 fn (cdr xs)))))
-
 (defun hanoi-print (disk from to)
   (println (string-concat "Move disk " disk 
     " from " (symbol->string from) 

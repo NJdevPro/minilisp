@@ -46,6 +46,8 @@ typedef struct Obj {
     // padding at the end of the object.
     int size;
 
+    int line_num;  // The Lisp line where object was created
+
     // Object values.
     union {
         // Int
@@ -76,6 +78,11 @@ typedef struct Obj {
     };
 } Obj;
 
+typedef struct {
+    char *filename;
+    size_t file_len;
+    int line_num;
+} filepos_t;
 
 void init_minilisp(Obj **env);
 int eval_input(char *input, Obj **env, Obj **expr);
