@@ -46,6 +46,8 @@ typedef struct Obj {
     // padding at the end of the object.
     int size;
 
+    int line_num;  // The Lisp line where object was created
+
     // Object values.
     union {
         // Int

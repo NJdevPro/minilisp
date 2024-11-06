@@ -16,10 +16,10 @@ jmp_buf context;
 
 extern filepos_t filepos;
 
-void error(char *fmt, ...) {
+void error(char *fmt, int line_num, ...) {
     va_list ap;
-    va_start(ap, fmt);
-    fprintf(stderr, "%s %d: ", filepos.filename, filepos.line_num);
+    va_start(ap, line_num);
+    fprintf(stderr, "%s[%d]: ", filepos.filename, line_num);
     vfprintf(stderr, fmt, ap);
     fprintf(stderr, "\n");
     va_end(ap);
@@ -49,6 +49,7 @@ extern Obj *alloc(void *root, int type, size_t size);
 static Obj *make_int(void *root, long long value) {
     Obj *r = alloc(root, TINT, sizeof(long long));
     r->value = value;
+    r->line_num = filepos.line_num;
     return r;
 }
 
@@ -56,18 +57,21 @@ static Obj *cons(void *root, Obj **car, Obj **cdr) {
     Obj *cell = alloc(root, TCELL, sizeof(Obj *) * 2);
     cell->car = *car;
     cell->cdr = *cdr;
+    cell->line_num = filepos.line_num;
     return cell;
 }
 
 static Obj *make_symbol(void *root, char *name) {
     Obj *sym = alloc(root, TSYMBOL, strlen(name) + 1);
     strcpy(sym->name, name);
+    sym->line_num = filepos.line_num;
     return sym;
 }
 
 static Obj *make_primitive(void *root, Primitive *fn) {
     Obj *r = alloc(root, TPRIMITIVE, sizeof(Primitive *));
     r->fn = fn;
+    r->line_num = filepos.line_num;
     return r;
 }
 
@@ -77,6 +81,7 @@ static Obj *make_function(void *root, Obj **env, int type, Obj **params, Obj **b
     r->params = *params;
     r->body = *body;
     r->env = *env;
+    r->line_num = filepos.line_num;
     return r;
 }
 
@@ -103,13 +108,30 @@ static Obj *acons(void *root, Obj **x, Obj **y, Obj **a) {
 #define SYMBOL_MAX_LEN 200
 const char symbol_chars[] = "~!@#$%^&*-_=+:/?<>";
 
-static Obj *read_expr(void *root, bool is_top_level);
+static Obj *read_expr(void *root);
 
 static int peek(void) {
     char c = getchar();
     ungetc(c, stdin);
     return c;
 }
+
+static int read_char(void) {
+    int c = getchar();
+    if (c == '\n') {
+        filepos.line_num++;
+        if (peek() == '\r') {
+            getchar();
+        }
+    } else if (c == '\r') {
+        filepos.line_num++;
+        if (peek() == '\n') {
+            getchar();
+        }
+    }
+    return c;
+}
+
 
 void swap(char *left, char *right) {
     char tmp = *left;
@@ -150,15 +172,15 @@ static Obj *read_list(void *root) {
     DEFINE3(obj, head, last);
     *head = Nil;
     for (;;) {
-        *obj = read_expr(root, false);
+        *obj = read_expr(root);
         if (!*obj)
-            error("Unclosed parenthesis");
+            error("Unclosed parenthesis", (*obj)->line_num);
         if (*obj == Cparen)
             return reverse(*head);
         if (*obj == Dot) {
-            *last = read_expr(root, false);
-            if (read_expr(root, false) != Cparen)
-                error("Closed parenthesis expected after dot");
+            *last = read_expr(root);
+            if (read_expr(root) != Cparen)
+                error("Closed parenthesis expected after dot", (*obj)->line_num);
             Obj *ret = reverse(*head);
             (*head)->cdr = *last;
             return ret;
@@ -183,7 +205,7 @@ static Obj *intern(void *root, char *name) {
 static Obj *read_quote(void *root) {
     DEFINE2(sym, tmp);
     *sym = intern(root, "quote");
-    *tmp = read_expr(root, false);
+    *tmp = read_expr(root);
     *tmp = cons(root, tmp, &Nil);
     *tmp = cons(root, sym, tmp);
     return *tmp;
@@ -191,7 +213,7 @@ static Obj *read_quote(void *root) {
 
 static long long read_number(int val) {
     while (isdigit(peek()))
-        val = val * 10 + (getchar() - '0');
+        val = val * 10 + (read_char() - '0');
     return val;
 }
 
@@ -201,8 +223,8 @@ static Obj *read_symbol(void *root, char c) {
     int len = 1;
     while (isalnum(peek()) || strchr(symbol_chars, peek())) {
         if (SYMBOL_MAX_LEN <= len)
-            error("Symbol name too long");
-        buf[len++] = getchar();
+            error("Symbol name too long", filepos.line_num);
+        buf[len++] = read_char();
     }
     buf[len] = '\0';
     return intern(root, buf);
@@ -220,34 +242,34 @@ static Obj *read_string(void *root) {
     int i = 0;
     
     while (1) {
-        int c = getchar();
+        int c = read_char();
         if (c == EOF)
-            error("Unclosed string literal");
+            error("Unclosed string literal", filepos.line_num);
         if (c == '"')
             break;
         if (c == '\\') {
-            c = getchar();
+            c = read_char();
             if (c == 'n') c = '\n';
             else if (c == 't') c = '\t';
             else if (c == 'r') c = '\r';
-            // Add more escape sequences as needed
         }
         if (i >= sizeof(buf) - 1)
-            error("String too long");
+            error("String too long", filepos.line_num);
         buf[i++] = c;
     }
     buf[i] = '\0';
     return make_string(root, buf);
 }
 
-static Obj *read_expr(void *root, bool is_top_level) {
+static Obj *read_expr(void *root) {
     for (;;) {
-        char c = getchar();
+        char c = getchar();               
         if (c == '\n') {
-            if (is_top_level) filepos.line_num++;
+            filepos.line_num++;
             if (peek() == '\r');
             continue;
         }
+
         if (c == ' ' || c == '\r' || c == '\t')
             continue;
         if (c == EOF)
@@ -272,7 +294,7 @@ static Obj *read_expr(void *root, bool is_top_level) {
             return make_int(root, -read_number(0));
         if (isalpha(c) || strchr(symbol_chars, c))
             return read_symbol(root, c);
-        error("Don't know how to handle %c", c);
+        error("Don't know how to handle %c", filepos.line_num, c);
     }
 }
 
@@ -322,7 +344,7 @@ static void print(Obj *obj) {
         }
         break;
     default:
-        error("Bug: print: Unknown tag type: %d", obj->type);
+        error("Bug: print: Unknown tag type: %d", obj->line_num, obj->type);
     }
     //puts("");
 }
@@ -354,7 +376,8 @@ static Obj *push_env(void *root, Obj **env, Obj **vars, Obj **vals) {
     *map = Nil;
     for (; (*vars)->type == TCELL; *vars = (*vars)->cdr, *vals = (*vals)->cdr) {
         if ((*vals)->type != TCELL)
-            error("Cannot apply function: number of argument does not match");
+            error("Cannot apply function: number of argument does not match",
+            (*vals)->line_num);
         *sym = (*vars)->car;
         *val = (*vals)->car;
         *map = acons(root, sym, val, map);
@@ -402,7 +425,7 @@ static Obj *apply_func(void *root, Obj **env, Obj **fn, Obj **args) {
 // Apply fn with args.
 static Obj *apply(void *root, Obj **env, Obj **fn, Obj **args) {
     if (!is_list(*args))
-        error("argument must be a list");
+        error("argument must be a list", (*args)->line_num);
     if ((*fn)->type == TPRIMITIVE)
         return (*fn)->fn(root, env, args);
     if ((*fn)->type == TFUNCTION) {
@@ -410,7 +433,7 @@ static Obj *apply(void *root, Obj **env, Obj **fn, Obj **args) {
         *eargs = eval_list(root, env, args);
         return apply_func(root, env, fn, eargs);
     }
-    error("not supported");
+    error("not supported", (*args)->line_num);
     return Nil; //fix warning
 }
 
@@ -472,8 +495,9 @@ static Obj *eval(void *root, Obj **env, Obj **obj) {
     case TSYMBOL: {
         // Variable
         Obj *bind = find(env, *obj);
-        if (!bind)
-            error("Undefined symbol: %s", (*obj)->name);
+        if (!bind) {
+            error("Undefined symbol: %s", (*obj)->line_num, (*obj)->name);
+        }
         return bind->cdr;
     }
     case TCELL: {
@@ -486,11 +510,11 @@ static Obj *eval(void *root, Obj **env, Obj **obj) {
         *fn = eval(root, env, fn);
         *args = (*obj)->cdr;
         if ((*fn)->type != TPRIMITIVE && (*fn)->type != TFUNCTION)
-            error("The head of a list must be a function");
+            error("The head of a list must be a function", (*obj)->line_num);
         return apply(root, env, fn, args);
     }
     default:
-        error("Bug: eval: Unknown tag type: %d", (*obj)->type);
+        error("Bug: eval: Unknown tag type: %d", (*obj)->line_num, (*obj)->type);
     }
     return Nil; // fix warning
 }
@@ -502,20 +526,20 @@ static Obj *eval(void *root, Obj **env, Obj **obj) {
 // 'expr
 static Obj *prim_quote(void *root, Obj **env, Obj **list) {
     if (length(*list) != 1)
-        error("Malformed quote");
+        error("Malformed quote", (*list)->line_num);
     return (*list)->car;
 }
 
 static Obj *prim_atom(void *root, Obj **env, Obj **list) {
     if (length(*list) != 1)
-        error("atom takes ontly 1 argument");
+        error("atom takes ontly 1 argument", (*list)->line_num);
     return ((*list)->car->type != TCELL) ? True : Nil;
 }
 
 // (cons expr expr)
 static Obj *prim_cons(void *root, Obj **env, Obj **list) {
     if (length(*list) != 2)
-        error("Malformed cons");
+        error("Malformed cons", (*list)->line_num);
     Obj *cell = eval_list(root, env, list);
     cell->cdr = cell->cdr->car;
     return cell;
@@ -525,7 +549,7 @@ static Obj *prim_cons(void *root, Obj **env, Obj **list) {
 static Obj *prim_car(void *root, Obj **env, Obj **list) {
     Obj *args = eval_list(root, env, list);
     if (args->car->type != TCELL || args->cdr != Nil)
-        error("Malformed car");
+        error("Malformed car", (*list)->line_num);
     return args->car->car;
 }
 
@@ -533,18 +557,18 @@ static Obj *prim_car(void *root, Obj **env, Obj **list) {
 static Obj *prim_cdr(void *root, Obj **env, Obj **list) {
     Obj *args = eval_list(root, env, list);
     if (args->car->type != TCELL || args->cdr != Nil)
-        error("Malformed cdr");
+        error("Malformed cdr", (*list)->line_num);
     return args->car->cdr;
 }
 
 // (setq <symbol> expr)
 static Obj *prim_setq(void *root, Obj **env, Obj **list) {
     if (length(*list) != 2 || (*list)->car->type != TSYMBOL)
-        error("Malformed setq");
+        error("Malformed setq", (*list)->line_num);
     DEFINE2(bind, value);
     *bind = find(env, (*list)->car);
     if (!*bind)
-        error("Unbound variable %s", (*list)->car->name);
+        error("Unbound variable %s", (*list)->line_num, (*list)->car->name);
     *value = (*list)->cdr->car;
     *value = eval(root, env, value);
     (*bind)->cdr = *value;
@@ -556,7 +580,7 @@ static Obj *prim_setcar(void *root, Obj **env, Obj **list) {
     DEFINE1(args);
     *args = eval_list(root, env, list);
     if (length(*args) != 2 || (*args)->car->type != TCELL)
-        error("Malformed setcar");
+        error("Malformed setcar", (*list)->line_num);
     (*args)->car->car = (*args)->cdr->car;
     return (*args)->car;
 }
@@ -564,7 +588,7 @@ static Obj *prim_setcar(void *root, Obj **env, Obj **list) {
 // (while cond expr ...)
 static Obj *prim_while(void *root, Obj **env, Obj **list) {
     if (length(*list) < 2)
-        error("Malformed while");
+        error("Malformed while", (*list)->line_num);
     DEFINE2(cond, exprs);
     *cond = (*list)->car;
     while (eval(root, env, cond) != Nil) {
@@ -597,7 +621,8 @@ static Obj *prim_length(void *root, Obj **env, Obj **list) {
                     len++;
             }
             else {
-                error("When length has a single argument, it must be a list or a string");
+                error("When length has a single argument, it must be a list or a string", 
+                (*list)->line_num);
             }
         }
     }
@@ -627,7 +652,8 @@ static Obj *prim_reverse(void *root, Obj **env, Obj **list) {
                 }
             }
             else {
-                error("When reverse has a single argument, it must be a list");
+                error("When reverse has a single argument, it must be a list", 
+                (*list)->line_num);
             }
         }
         return car;
@@ -639,7 +665,7 @@ static Obj *prim_plus(void *root, Obj **env, Obj **list) {
     long long sum = 0;
     for (Obj *args = eval_list(root, env, list); args != Nil; args = args->cdr) {
         if (args->car->type != TINT)
-            error("+ takes only numbers");
+            error("+ takes only numbers", (*list)->line_num);
         sum += args->car->value;
     }
     return make_int(root, sum);
@@ -650,7 +676,7 @@ static Obj *prim_mult(void *root, Obj **env, Obj **list) {
     long long prod = 1;
     for (Obj *args = eval_list(root, env, list); args != Nil; args = args->cdr) {
         if (args->car->type != TINT)
-            error("* takes only numbers");
+            error("* takes only numbers", (*list)->line_num);
         prod *= args->car->value;
     }
     return make_int(root, prod);
@@ -662,7 +688,7 @@ static Obj *prim_div(void *root, Obj **env, Obj **list) {
     long long r = args->car->value;
     for (Obj *p = args->cdr; p != Nil; p = p->cdr){
         if (p->car->type != TINT)
-            error("/ takes only numbers");
+            error("/ takes only numbers", (*list)->line_num);
         r /= p->car->value;
     }
     return make_int(root, r);
@@ -674,7 +700,7 @@ static Obj *prim_modulo(void *root, Obj **env, Obj **list) {
     long long r = args->car->value;
     for (Obj *p = args->cdr; p != Nil; p = p->cdr){
         if (p->car->type != TINT)
-            error("mod takes only numbers");
+            error("mod takes only numbers", (*list)->line_num);
         r %= p->car->value;
     }
     return make_int(root, r);
@@ -685,7 +711,7 @@ static Obj *prim_minus(void *root, Obj **env, Obj **list) {
     Obj *args = eval_list(root, env, list);
     for (Obj *p = args; p != Nil; p = p->cdr)
         if (p->car->type != TINT)
-            error("- takes only numbers");
+            error("- takes only numbers", (*list)->line_num);
     if (args->cdr == Nil)
         return make_int(root, -args->car->value);
     long long r = args->car->value;
@@ -699,11 +725,11 @@ static Obj *prim_minus(void *root, Obj **env, Obj **list) {
 static Obj *PRIM_OP(void *root, Obj **env, Obj **list) {    \
     Obj *args = eval_list(root, env, list);                 \
     if (length(args) != 2)                                  \
-        error(#OP " takes only 2 number");                  \
+        error(#OP " takes only 2 number", (*list)->line_num);\
     Obj *x = args->car;                                     \
     Obj *y = args->cdr->car;                                \
     if (x->type != TINT || y->type != TINT)                 \
-        error(#OP " takes only 2 numbers");                 \
+        error(#OP " takes only 2 numbers", (*list)->line_num);                 \
     return x->value OP y->value ? True : Nil;               \
 }
 
@@ -716,7 +742,7 @@ PRIM_COMPARISON_OP(prim_gte, >=)
 // (not <cell>)
 static Obj *prim_not(void *root, Obj **env, Obj **list) {
     if (length(*list) != 1)
-        error("not accepts 1 argument");
+        error("not accepts 1 argument", (*list)->line_num);
     Obj *values = eval_list(root, env, list);
     return values->car == Nil ? True : Nil;
 }
@@ -747,7 +773,7 @@ static Obj *prim_load(void *root, Obj **env, Obj **list) {
     DEFINE1(expr);
     Obj *args = eval_list(root, env, list);
     if (args->car->type != TSTRING){
-        error("load: filename must be a string");
+        error("load: filename must be a string", (*list)->line_num);
     }
     char *name = args->car->name;
     
@@ -766,23 +792,23 @@ static Obj *prim_load(void *root, Obj **env, Obj **list) {
 
 static Obj *prim_exit(void *root, Obj **env, Obj **list) {
     if (length(*list) != 1)
-        error("exit accepts 1 argument");
+        error("exit accepts 1 argument", (*list)->line_num);
     Obj *values = eval_list(root, env, list);
     Obj *first = values->car; 
     if (first->type != TINT)
-        error("* must be an integer");
+        error("* must be an integer", (*list)->line_num);
     exit(first->value);
 }
 
 static Obj *handle_function(void *root, Obj **env, Obj **list, int type) {
     if ((*list)->type != TCELL || !is_list((*list)->car) || (*list)->cdr->type != TCELL)
-        error("Malformed lambda");
+        error("Malformed lambda", (*list)->line_num);
     Obj *p = (*list)->car;
     for (; p->type == TCELL; p = p->cdr)
         if (p->car->type != TSYMBOL)
-            error("Parameter must be a symbol");
+            error("Parameter must be a symbol", (*list)->line_num);
     if (p != Nil && p->type != TSYMBOL)
-        error("Parameter must be a symbol");
+        error("Parameter must be a symbol", (*list)->line_num);
     DEFINE2(params, body);
     *params = (*list)->car;
     *body = (*list)->cdr;
@@ -796,7 +822,8 @@ static Obj *prim_lambda(void *root, Obj **env, Obj **list) {
 
 static Obj *handle_defun(void *root, Obj **env, Obj **list, int type) {
     if (length(*list) < 3 || (*list)->car->type != TSYMBOL || (*list)->cdr->type != TCELL)
-        error("Malformed defun: correct form is (defun <symbol> (<symbol> ...) expr ...)");
+        error("Malformed defun: correct form is (defun <symbol> (<symbol> ...) expr ...)"
+        , (*list)->line_num);
     DEFINE3(fn, sym, rest);
     *sym = (*list)->car;
     *rest = (*list)->cdr;
@@ -813,7 +840,7 @@ static Obj *prim_defun(void *root, Obj **env, Obj **list) {
 // (define <symbol> expr)
 static Obj *prim_define(void *root, Obj **env, Obj **list) {
     if (length(*list) != 2 || (*list)->car->type != TSYMBOL)
-        error("Malformed define");
+        error("Malformed define", (*list)->line_num);
     DEFINE2(sym, value);
     *sym = (*list)->car;
     *value = (*list)->cdr->car;
@@ -830,7 +857,7 @@ static Obj *prim_defmacro(void *root, Obj **env, Obj **list) {
 // (macroexpand expr)
 static Obj *prim_macroexpand(void *root, Obj **env, Obj **list) {
     if (length(*list) != 1)
-        error("Malformed macroexpand");
+        error("Malformed macroexpand", (*list)->line_num);
     DEFINE1(body);
     *body = (*list)->car;
     return macroexpand(root, env, body);
@@ -859,7 +886,7 @@ static Obj *prim_progn(void *root, Obj **env, Obj **list) {
 // (if expr expr expr ...)
 static Obj *prim_if(void *root, Obj **env, Obj **list) {
     if (length(*list) < 2)
-        error("Malformed if");
+        error("Malformed if", (*list)->line_num);
     DEFINE3(cond, then, els);
     *cond = (*list)->car;
     *cond = eval(root, env, cond);
@@ -874,7 +901,7 @@ static Obj *prim_if(void *root, Obj **env, Obj **list) {
 // (eq expr expr)
 static Obj *prim_eq(void *root, Obj **env, Obj **list) {
     if (length(*list) != 2)
-        error("Malformed eq");
+        error("Malformed eq", (*list)->line_num);
     Obj *values = eval_list(root, env, list);
     return values->car == values->cdr->car ? True : Nil;
 }
@@ -887,7 +914,8 @@ static Obj *prim_string_concat(void *root, Obj **env, Obj **list) {
     size_t total_len = 1;  // Start with 1 for null terminator
     for (Obj *p = args; p != Nil; p = p->cdr) {
         if (p->car->type != TSTRING && p->car->type != TINT)
-            error("string-concat arguments must be strings or numbers");
+            error("string-concat arguments must be strings or numbers", 
+            (*list)->line_num);
         if (p->car->type == TINT) {
             long long val = p->car->value;
             char var[22];
@@ -901,7 +929,7 @@ static Obj *prim_string_concat(void *root, Obj **env, Obj **list) {
     
     char *buf = malloc(total_len);
     if (!buf)
-        error("Out of memory in string-concat");
+        error("Out of memory in string-concat", (*list)->line_num);
     buf[0] = '\0';
     
     // Second pass: concatenate all strings
@@ -925,10 +953,10 @@ static Obj *prim_string_concat(void *root, Obj **env, Obj **list) {
 static Obj *prim_symbol_to_string(void *root, Obj **env, Obj **list) {
     Obj *args = eval_list(root, env, list);
     if (length(args) != 1)
-        error("symbol->string requires 1 argument");
+        error("symbol->string requires 1 argument", (*list)->line_num);
     
     if (args->car->type != TSYMBOL)
-        error("symbol->string argument must be a symbol");
+        error("symbol->string argument must be a symbol", (*list)->line_num);
         
     return make_string(root, args->car->name);
 }
@@ -936,10 +964,10 @@ static Obj *prim_symbol_to_string(void *root, Obj **env, Obj **list) {
 static Obj *prim_string_to_symbol(void *root, Obj **env, Obj **list) {
     Obj *args = eval_list(root, env, list);
     if (length(args) != 1)
-        error("string->symbol requires 1 argument");
+        error("string->symbol requires 1 argument", (*list)->line_num);
     
     if (args->car->type != TSTRING)
-        error("string->symbol argument must be a string");
+        error("string->symbol argument must be a string", (*list)->line_num);
         
     return intern(root, args->car->name);
 }
@@ -948,10 +976,10 @@ static Obj *prim_string_to_symbol(void *root, Obj **env, Obj **list) {
 static Obj *prim_string_eq(void *root, Obj **env, Obj **list) {
     Obj *args = eval_list(root, env, list);
     if (length(args) != 2)
-        error("string= requires 2 arguments");
+        error("string= requires 2 arguments", (*list)->line_num);
     
     if (args->car->type != TSTRING || args->cdr->car->type != TSTRING)
-        error("string= arguments must be strings");
+        error("string= arguments must be strings", (*list)->line_num);
         
     return strcmp(args->car->name, args->cdr->car->name) == 0 ? True : Nil;
 }
@@ -1034,14 +1062,14 @@ int eval_input(char *input, Obj **env, Obj **expr) {
     if (setjmp(context) == 0){
         Obj *result = NULL;
         while (true) {
-            *expr = read_expr(root, true);         
+            *expr = read_expr(root);         
             if (!*expr) 
                 break;
                 
             if (*expr == Cparen)
-                error("Stray close parenthesis");
+                error("Stray close parenthesis", (*expr)->line_num);
             if (*expr == Dot)
-                error("Stray dot");
+                error("Stray dot", (*expr)->line_num);
                 
             result = eval(root, env, expr);
         }

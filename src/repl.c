@@ -50,7 +50,7 @@ char *hints(const char *buf, const char **ansi1, const char **ansi2) {
 }
 
 // This struct keeps track of the current file/line being evaluated
-filepos_t filepos = {"", 0, 0};
+filepos_t filepos = {"", 0, 1};
 
 void minilisp(char *text, size_t length, bool with_repl, Obj **env, Obj **expr) {
 
@@ -144,7 +144,7 @@ void process_file(char *fname, Obj **env, Obj **expr) {
     
     filepos.filename = strdup(fname);
     filepos.file_len = len;
-    filepos.line_num = 0;
+    filepos.line_num = 1;
 
     // Save old stdin
     FILE *old_stdin = stdin;
