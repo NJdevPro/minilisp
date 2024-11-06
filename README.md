@@ -6,6 +6,7 @@ This is my attempt at making Rui Ueyama (rui314)'s MiniLisp slightly more user f
 and powerful.
 Not being limited by the 1000 lines challenge, I've added a number of basic primitives 
 to the original program, while trying to keep the goal of simplicity and conciseness.
+
 The whole program compiles to less than 100 kb without debugging symbols and should be 
 able to run on low powered devices.
 
@@ -13,6 +14,7 @@ The whole program compiles to less than 100 kb and should be able to run on low 
 The added primitives:
 * strings
 * predicates >, >=, <=, or, and, not,
+
 * functions length, reverse, progn, load.
 
 This has the side effect of being much faster as well, since all these primitives are 
@@ -76,26 +78,14 @@ CTRL-Z         SUSPEND PROCESS
 ```
 
 The REPL also saves the history of commands in the file history.txt
-
-Known bugs:
-* Operators "and" and "or" do not work like their typical Lisp counterpart 
-because they evaluate all their operands at the same time instead of one
-by one.
-* The pasting in the REPL doesn't work well.
-* Multiline inputs are recalled as different lines
-
-
-Original README
-=======
 This file is loaded at startup, so one can recall previous commands.
 
 Future improvements:
 - floating point numbers
-- strings ?
 - data files
 
 Known bugs:
-* the paste function does not work well.
+* the paste function does not work very well.
 * recall of multiline commands does not work as expected. 
 
 
@@ -107,7 +97,7 @@ decided to write a Lisp interpreter. That turned to be a
 fun weekend project, and the outcome is a mini lisp implementation
 that supports
 
-- integers, symbols, cons cells,
+- integers, symbols, cons cells
 - global variables,
 - lexically-scoped local variables,
 - closures,
