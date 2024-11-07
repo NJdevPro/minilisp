@@ -174,13 +174,13 @@ static Obj *read_list(void *root) {
     for (;;) {
         *obj = read_expr(root);
         if (!*obj)
-            error("Unclosed parenthesis", (*obj)->line_num);
+            error("Unclosed parenthesis", filepos.line_num);
         if (*obj == Cparen)
             return reverse(*head);
         if (*obj == Dot) {
             *last = read_expr(root);
             if (read_expr(root) != Cparen)
-                error("Closed parenthesis expected after dot", (*obj)->line_num);
+                error("Closed parenthesis expected after dot", filepos.line_num);
             Obj *ret = reverse(*head);
             (*head)->cdr = *last;
             return ret;
@@ -660,77 +660,36 @@ static Obj *prim_reverse(void *root, Obj **env, Obj **list) {
     }
 }
 
+#define PRIM_ARITHMETIC_OP(PRIM_OP, OP, OPEQ)                       \
+static Obj *PRIM_OP(void *root, Obj **env, Obj **list) {            \
+    Obj *args = eval_list(root, env, list);                         \
+    long long r = args->car->value;                                 \
+    for (Obj *p = args->cdr; p != Nil; p = p->cdr) {                \
+        if (p->car->type != TINT)                                   \
+            error(#OP " takes only numbers", (*list)->line_num);    \
+        r OPEQ p->car->value;                                       \
+    }                                                               \
+    return make_int(root, r);                                       \
+}
+
 // (+ <integer> ...)
-static Obj *prim_plus(void *root, Obj **env, Obj **list) {
-    long long sum = 0;
-    for (Obj *args = eval_list(root, env, list); args != Nil; args = args->cdr) {
-        if (args->car->type != TINT)
-            error("+ takes only numbers", (*list)->line_num);
-        sum += args->car->value;
-    }
-    return make_int(root, sum);
-}
-
-// (* <integer> ...)
-static Obj *prim_mult(void *root, Obj **env, Obj **list) {
-    long long prod = 1;
-    for (Obj *args = eval_list(root, env, list); args != Nil; args = args->cdr) {
-        if (args->car->type != TINT)
-            error("* takes only numbers", (*list)->line_num);
-        prod *= args->car->value;
-    }
-    return make_int(root, prod);
-}
-
-// (/ <integer> ...)
-static Obj *prim_div(void *root, Obj **env, Obj **list) {
-    Obj *args = eval_list(root, env, list);
-    long long r = args->car->value;
-    for (Obj *p = args->cdr; p != Nil; p = p->cdr){
-        if (p->car->type != TINT)
-            error("/ takes only numbers", (*list)->line_num);
-        r /= p->car->value;
-    }
-    return make_int(root, r);
-}
-
-// (% <integer> ...)
-static Obj *prim_modulo(void *root, Obj **env, Obj **list) {
-    Obj *args = eval_list(root, env, list);
-    long long r = args->car->value;
-    for (Obj *p = args->cdr; p != Nil; p = p->cdr){
-        if (p->car->type != TINT)
-            error("mod takes only numbers", (*list)->line_num);
-        r %= p->car->value;
-    }
-    return make_int(root, r);
-}
-
-// (- <integer> ...)
-static Obj *prim_minus(void *root, Obj **env, Obj **list) {
-    Obj *args = eval_list(root, env, list);
-    for (Obj *p = args; p != Nil; p = p->cdr)
-        if (p->car->type != TINT)
-            error("- takes only numbers", (*list)->line_num);
-    if (args->cdr == Nil)
-        return make_int(root, -args->car->value);
-    long long r = args->car->value;
-    for (Obj *p = args->cdr; p != Nil; p = p->cdr)
-        r -= p->car->value;
-    return make_int(root, r);
-}
+PRIM_ARITHMETIC_OP(prim_plus, +, += )
+PRIM_ARITHMETIC_OP(prim_minus, -, -= )
+PRIM_ARITHMETIC_OP(prim_mult, *, *= )
+PRIM_ARITHMETIC_OP(prim_div , /, /= )
+PRIM_ARITHMETIC_OP(prim_modulo, %, %= )
 
 // (op <integer> <integer>)
-#define PRIM_COMPARISON_OP(PRIM_OP, OP)                     \
-static Obj *PRIM_OP(void *root, Obj **env, Obj **list) {    \
-    Obj *args = eval_list(root, env, list);                 \
-    if (length(args) != 2)                                  \
-        error(#OP " takes only 2 number", (*list)->line_num);\
-    Obj *x = args->car;                                     \
-    Obj *y = args->cdr->car;                                \
-    if (x->type != TINT || y->type != TINT)                 \
-        error(#OP " takes only 2 numbers", (*list)->line_num);                 \
-    return x->value OP y->value ? True : Nil;               \
+#define PRIM_COMPARISON_OP(PRIM_OP, OP)                             \
+static Obj *PRIM_OP(void *root, Obj **env, Obj **list) {            \
+    Obj *args = eval_list(root, env, list);                         \
+    if (length(args) != 2)                                          \
+        error(#OP " takes only 2 number", (*list)->line_num);       \
+    Obj *x = args->car;                                             \
+    Obj *y = args->cdr->car;                                        \
+    if (x->type != TINT || y->type != TINT)                         \
+        error(#OP " takes only 2 numbers", (*list)->line_num);      \
+    return x->value OP y->value ? True : Nil;                       \
 }
 
 PRIM_COMPARISON_OP(prim_num_eq, ==)
