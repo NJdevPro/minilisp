@@ -1,8 +1,8 @@
 (defun list (x . y) (cons x y))
 
-;; (let1 var val body ...)
+;; (let var val body ...)
 ;; => ((lambda (var) body ...) val)
-(defmacro let1 (var val . body)
+(defmacro let (var val . body)
   (cons (cons 'lambda (cons (list var) body))
 	(list val)))
 
@@ -30,7 +30,7 @@
       expr))
 
 ;; (or e1 e2 ...)
-;; => (let1 <tmp> e1
+;; => (let <tmp> e1
 ;;      (if <tmp> <tmp> (or e2 ...)))
 ;; (or e1)
 ;; => e1
@@ -39,8 +39,8 @@
 ;; arguments more than once.
 (defmacro or (expr . rest)
   (if rest
-      (let1 var (gensym)
-	    (list 'let1 var expr
+      (let var (gensym)
+	    (list 'let var expr
 		  (list 'if var var (cons 'or rest))))
     expr))
 
