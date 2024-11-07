@@ -1,4 +1,4 @@
-(defun list (x . y) (cons x y))
+(load "examples/library.lisp")
 
 (defun hanoi-print (disk from to)
   (println (string-concat "Move disk " disk 
