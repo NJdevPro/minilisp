@@ -146,6 +146,8 @@ run eq t "(eq 'foo 'foo)"
 run eq t "(eq + +)"
 run eq '()' "(eq 'foo 'bar)"
 run eq '()' "(eq + 'bar)"
+run eq '()' '(eq "hello" "Hello")'
+run eq t  '(eq "hello" "hello")'
 
 # gensym
 run gensym G__0 '(gensym)'
@@ -163,6 +165,12 @@ run args 15 '(defun f (x y z) (+ x y z)) (f 3 5 7)'
 
 run restargs '(3 5 7)' '(defun f (x . y) (cons x y)) (f 3 5 7)'
 run restargs '(3)'    '(defun f (x . y) (cons x y)) (f 3)'
+
+# strings
+run 'symbol->string' 'twelve' "
+  (define twelve 12)
+  (symbol->string 'twelve)"
+run 'string->symbol' 'twelve' '(string->symbol "twelve")'
 
 # Lexical closures
 run closure 3 '(defun call (f) ((lambda (var) (f)) 5))

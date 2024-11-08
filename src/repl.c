@@ -108,7 +108,7 @@ static size_t read_file(char *fname, char **text) {
     size_t length = 0;
     FILE *f = fopen(fname, "r");
     if (!f) {
-        error("Failed to load file %s", fname);
+        error("Failed to load file %s", filepos.line_num, fname);
         return 0;
     }
 
@@ -118,14 +118,14 @@ static size_t read_file(char *fname, char **text) {
     
     *text = malloc(length + 1);
     if (!*text) {
-        error("Out of memory.");
+        error("Out of memory.", filepos.line_num);
         fclose(f);
         return 0;
     }
 
     size_t read = fread(*text, 1, length, f);
     if (read != length) {
-        error("Failed to read entire file");
+        error("Failed to read entire file", filepos.line_num);
         free(*text);
         *text = NULL;
         fclose(f);
@@ -152,7 +152,7 @@ void process_file(char *fname, Obj **env, Obj **expr) {
     FILE *stream = fmemopen(text, len, "r");
     if (!stream) {
         free(text);
-        error("Failed to create memory stream");
+        error("Failed to create memory stream for %s", filepos.line_num, fname);
         return;
     }
 
