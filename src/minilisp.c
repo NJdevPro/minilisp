@@ -674,10 +674,23 @@ static Obj *PRIM_OP(void *root, Obj **env, Obj **list) {            \
 
 // (+ <integer> ...)
 PRIM_ARITHMETIC_OP(prim_plus, +, += )
-PRIM_ARITHMETIC_OP(prim_minus, -, -= )
 PRIM_ARITHMETIC_OP(prim_mult, *, *= )
 PRIM_ARITHMETIC_OP(prim_div , /, /= )
 PRIM_ARITHMETIC_OP(prim_modulo, %, %= )
+
+// (- <integer> ...)
+static Obj *prim_minus(void *root, Obj **env, Obj **list) {
+    Obj *args = eval_list(root, env, list);
+    for (Obj *p = args; p != Nil; p = p->cdr)
+        if (p->car->type != TINT)
+            error("- takes only numbers", (*list)->line_num);
+    if (args->cdr == Nil)
+        return make_int(root, -args->car->value);
+    long long r = args->car->value;
+    for (Obj *p = args->cdr; p != Nil; p = p->cdr)
+        r -= p->car->value;
+    return make_int(root, r);
+}
 
 // (op <integer> <integer>)
 #define PRIM_COMPARISON_OP(PRIM_OP, OP)                             \
@@ -860,9 +873,17 @@ static Obj *prim_if(void *root, Obj **env, Obj **list) {
 // (eq expr expr)
 static Obj *prim_eq(void *root, Obj **env, Obj **list) {
     if (length(*list) != 2)
-        error("Malformed eq", (*list)->line_num);
+        error("eq takes 2 arguments only", (*list)->line_num);
     Obj *values = eval_list(root, env, list);
-    return values->car == values->cdr->car ? True : Nil;
+    Obj *first = values->car;
+    Obj *second = values->cdr->car;
+    if (first->type == TSTRING){
+        if (second->type == TSTRING)
+            return strcmp(first->name, second->name) == 0 ? True : Nil;
+        else
+            error("The 2 arguments of eq must be of the same type", (*list)->line_num);
+    } 
+    return first == second ? True : Nil;
 }
 
 // String primitives
@@ -931,18 +952,6 @@ static Obj *prim_string_to_symbol(void *root, Obj **env, Obj **list) {
     return intern(root, args->car->name);
 }
 
-// String comparison
-static Obj *prim_string_eq(void *root, Obj **env, Obj **list) {
-    Obj *args = eval_list(root, env, list);
-    if (length(args) != 2)
-        error("string= requires 2 arguments", (*list)->line_num);
-    
-    if (args->car->type != TSTRING || args->cdr->car->type != TSTRING)
-        error("string= arguments must be strings", (*list)->line_num);
-        
-    return strcmp(args->car->name, args->cdr->car->name) == 0 ? True : Nil;
-}
-
 static void add_primitive(void *root, Obj **env, char *name, Primitive *fn) {
     DEFINE2(sym, prim);
     *sym = intern(root, name);
@@ -994,7 +1003,6 @@ static void define_primitives(void *root, Obj **env) {
     add_primitive(root, env, "string-concat", prim_string_concat);
     add_primitive(root, env, "symbol->string", prim_symbol_to_string);
     add_primitive(root, env, "string->symbol", prim_string_to_symbol);
-    add_primitive(root, env, "string=", prim_string_eq);
     add_primitive(root, env, "load", prim_load);
     add_primitive(root, env, "exit", prim_exit);
 }

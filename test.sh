@@ -146,6 +146,8 @@ run eq t "(eq 'foo 'foo)"
 run eq t "(eq + +)"
 run eq '()' "(eq 'foo 'bar)"
 run eq '()' "(eq + 'bar)"
+run eq '()' '(eq "hello" "Hello")'
+run eq t  '(eq "hello" "hello")'
 
 # gensym
 run gensym G__0 '(gensym)'
@@ -165,8 +167,6 @@ run restargs '(3 5 7)' '(defun f (x . y) (cons x y)) (f 3 5 7)'
 run restargs '(3)'    '(defun f (x . y) (cons x y)) (f 3)'
 
 # strings
-run string= '()' '(string= "hello" "Hello")'
-run string= t  '(string= "hello" "hello")'
 run 'symbol->string' 'twelve' "
   (define twelve 12)
   (symbol->string 'twelve)"
