@@ -56,6 +56,13 @@
     (cons (fn (car lis))
 	  (map (cdr lis) fn))))
 
+(defun reduce (fn lst init)
+  (if (eq () lst)
+      init
+      (reduce fn 
+              (cdr lst)
+              (fn init (car lst)))))
+              
 ;; Applies each element of lis to pred. If pred returns a true value, terminate
 ;; the evaluation and returns pred's return value. If all of them return (),
 ;; returns ().
@@ -98,7 +105,7 @@
   (or (not lis)
       (progn (fn (car lis))
 	     (for-each (cdr lis) fn))))
-       
+
 ; Concatenates and flattens lists into a single list
 (defun append (first . rest)
   (if (eq () rest)
