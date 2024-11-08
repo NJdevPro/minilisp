@@ -377,7 +377,7 @@ static Obj *push_env(void *root, Obj **env, Obj **vars, Obj **vals) {
     for (; (*vars)->type == TCELL; *vars = (*vars)->cdr, *vals = (*vals)->cdr) {
         if ((*vals)->type != TCELL)
             error("Cannot apply function: number of argument does not match",
-            (*vals)->line_num);
+            (*vars)->line_num);
         *sym = (*vars)->car;
         *val = (*vals)->car;
         *map = acons(root, sym, val, map);

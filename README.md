@@ -272,22 +272,23 @@ exhaustion error.
 
 `(progn expr expr ...)` executes several expressions in sequence.
 
-    (progn (print "I own ") 
-        (defun add(x y)(+ x y))
-        (println (add 3 7) " cents"))  ; -> prints "I own 10 cents"
+    ( progn (print "I own ")
+            (defun add(x y)(+ x y))
+            (println (add 3 7) " cents") )  ; -> prints "I own 10 cents"
 
 ### Equivalence test operators
 
 `eq` takes two arguments and returns `t` if the objects are the same. What `eq`
 really does is a pointer comparison, so two objects happened to have the same
 contents but actually different are considered to not be the same by `eq`.
+`eq` can also compare two strings.
 
 ### String functions
 
-`string=` compares two strings.
+`eq` compares two strings.
 
-    (string= "Hello" "Hello")    ; -> t
-    (string= "Hello" "World")    ; -> ()
+    (eq "Hello" "Hello")    ; -> t
+    (eq "Hello" "hello")    ; -> ()
     
 `string-concat` concatenates strings.
 

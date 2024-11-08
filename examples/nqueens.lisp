@@ -8,13 +8,6 @@
 ;;; This program solves N-queens puzzle by depth-first backtracking.
 ;;;
 
-;;;
-;;; Basic macros
-;;;
-;;; Because the language does not have quasiquote, we need to construct an
-;;; expanded form using cons and list.
-;;;
-
 (load "examples/library.lisp")
 
 ;;;
@@ -74,7 +67,7 @@
       ;; Problem solved
       (progn (print board)
 	     (println '$))
-    (for-each (iota board-size)
+    (map (iota board-size)
 	      (lambda (y)
 		(unless (conflict? board x y)
 		  (set board x y)
