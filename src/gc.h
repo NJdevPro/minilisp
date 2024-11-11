@@ -10,9 +10,9 @@
 //======================================================================
 
 // The size of the heap in byte
-#define MEMORY_SIZE 262144
+#define MEMORY_SIZE 65536 * 4
 
-extern void *root;    // root of memory
+extern void *gc_root;    // root of memory
 
 // Currently we are using Cheney's copying GC algorithm, with which the available memory is split
 // into two halves and all objects are moved from one half to another every time GC is invoked. That
@@ -34,35 +34,43 @@ extern void *root;    // root of memory
 
 #define ROOT_END ((void *)-1)
 
-// 初始化 frame (env) 陣列
-#define ADD_ROOT(size)                          \
-    void *root_ADD_ROOT_[size + 2];             \
-    root_ADD_ROOT_[0] = root;                   \
-    for (int i = 1; i <= size; i++)             \
-        root_ADD_ROOT_[i] = NULL;               \
-    root_ADD_ROOT_[size + 1] = ROOT_END;        \
-    root = root_ADD_ROOT_
-// 新增 1 個變數物件
-#define DEFINE1(var1)                           \
-    ADD_ROOT(1);                                \
-    Obj **var1 = (Obj **)(root_ADD_ROOT_ + 1)
-// 新增 2 個變數物件
-#define DEFINE2(var1, var2)                     \
-    ADD_ROOT(2);                                \
-    Obj **var1 = (Obj **)(root_ADD_ROOT_ + 1);  \
-    Obj **var2 = (Obj **)(root_ADD_ROOT_ + 2)
-// 新增 3 個變數物件
-#define DEFINE3(var1, var2, var3)               \
-    ADD_ROOT(3);                                \
-    Obj **var1 = (Obj **)(root_ADD_ROOT_ + 1);  \
-    Obj **var2 = (Obj **)(root_ADD_ROOT_ + 2);  \
-    Obj **var3 = (Obj **)(root_ADD_ROOT_ + 3)
-// 新增 4 個變數物件
-#define DEFINE4(var1, var2, var3, var4)         \
-    ADD_ROOT(4);                                \
-    Obj **var1 = (Obj **)(root_ADD_ROOT_ + 1);  \
-    Obj **var2 = (Obj **)(root_ADD_ROOT_ + 2);  \
-    Obj **var3 = (Obj **)(root_ADD_ROOT_ + 3);  \
-    Obj **var4 = (Obj **)(root_ADD_ROOT_ + 4)
-    
+static inline void** add_root_frame(void **prev_frame, int size, void *frame[]) {
+    frame[0] = prev_frame;
+    for (int i = 1; i <= size; i++)
+        frame[i] = NULL;
+    frame[size + 1] = ROOT_END;
+    return frame;
+}
+
+#define DEFINE1(prev_frame, var1)                \
+    void *root_frame[3];                         \
+    prev_frame = add_root_frame(prev_frame, 1, root_frame);       \
+    Obj **var1 = (Obj **)(root_frame + 1);
+
+#define DEFINE2(prev_frame, var1, var2)          \
+    void *root_frame[4];                         \
+    prev_frame = add_root_frame(prev_frame, 2, root_frame);  \
+    Obj **var1 = (Obj **)(root_frame + 1);       \
+    Obj **var2 = (Obj **)(root_frame + 2);
+
+#define DEFINE3(prev_frame, var1, var2, var3)   \
+    void *root_frame[5];                        \
+    prev_frame = add_root_frame(prev_frame, 3, root_frame); \
+    Obj **var1 = (Obj **)(root_frame + 1);      \
+    Obj **var2 = (Obj **)(root_frame + 2);      \
+    Obj **var3 = (Obj **)(root_frame + 3);
+
+#define DEFINE4(prev_frame, var1, var2, var3, var4)         \
+    void *root_frame[6];                        \
+    prev_frame = add_root_frame(prev_frame, 4, root_frame); \
+    Obj **var1 = (Obj **)(root_frame + 1);      \
+    Obj **var2 = (Obj **)(root_frame + 2);      \
+    Obj **var3 = (Obj **)(root_frame + 3);      \
+    Obj **var4 = (Obj **)(root_frame + 4);
+
+
+void *alloc_semispace();
+Obj *alloc(void *root, int type, size_t size);
+void gc(void *root);
+
 #endif

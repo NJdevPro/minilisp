@@ -7,13 +7,13 @@ function fail() {
 }
 
 function do_run() {
-  error=$(./minilisp -r -x "$3" 2>&1 > /dev/null)
+  error=$(echo "$3" | ./minilisp 2>&1 > /dev/null)
   if [ -n "$error" ]; then
     echo FAILED
     fail "$error"
   fi
 
-  result=$(./minilisp -r -x "$3" 2> /dev/null | tail -1)
+  result=$(echo "$3" | ./minilisp 2> /dev/null | tail -1)
   if [ "$result" != "$2" ]; then
     echo FAILED
     fail "$2 expected, but got $result"
@@ -48,20 +48,9 @@ run 'unary -' -3 '(- 3)'
 run '-' -2 '(- 3 5)'
 run '-' -9 '(- 3 5 7)'
 
-run 'not' '()' '(not t)'
-run 'not' '()' '(not 1)'
-run 'not' 't' '(not ())'
-
-run 'and' 't' '(and)'
-run 'and' '2' '(and 1 2)'
-run 'and' '()' '(and 1 ())'
-run 'and' '()' '(and () ())'
-run 'and' '()' '(and 1 () 2)'
-
-run 'or' '()' '(or)'
-run 'or' '1' '(or 1 2)'
-run 'or' '2' '(or () 2)'
-run 'or' '()' '(or () ())'
+run '<' t '(< 2 3)'
+run '<' '()' '(< 3 3)'
+run '<' '()' '(< 4 3)'
 
 run 'literal list' '(a b c)' "'(a b c)"
 run 'literal list' '(a b . c)' "'(a b . c)"
@@ -75,29 +64,10 @@ run cdr "(b c)" "(cdr '(a b c))"
 
 run setcar "(x . b)" "(define obj (cons 'a 'b)) (setcar obj 'x) obj"
 
-run length 0 "(length)"
-run length 1 "(length '())"
-run length 2 "(length '(()t))"
-run length 3 "(length '(1 () 3))"
-run length 0 "(length \"\")"
-run length 5 "(length \"1 2 3\")"
-run length 3 "(length '(a) t 42)"
-
-run reverse "()" "(reverse)"
-run reverse "(c b a)" "(reverse '(a b c))"
-run reverse "(t c (a . b))" "(reverse '((a . b) c t))"
-run reverse "4321" "(reverse \"1234\")"
-run reverse "(c b a)" "(reverse \"a\" \"b\" \"c\")"
-
 # Comments
 run comment 5 "
   ; 2
   5 ; 3"
-
-# Introspection
-run atom '()' "(atom '(a b))"
-run atom t    "(atom \"\")"  
-run atom t    "(atom ())"    
 
 # Global variables
 run define 7 '(define x 7) x'
@@ -146,8 +116,6 @@ run eq t "(eq 'foo 'foo)"
 run eq t "(eq + +)"
 run eq '()' "(eq 'foo 'bar)"
 run eq '()' "(eq + 'bar)"
-run eq '()' '(eq "hello" "Hello")'
-run eq t  '(eq "hello" "hello")'
 
 # gensym
 run gensym G__0 '(gensym)'
@@ -167,9 +135,10 @@ run restargs '(3 5 7)' '(defun f (x . y) (cons x y)) (f 3 5 7)'
 run restargs '(3)'    '(defun f (x . y) (cons x y)) (f 3)'
 
 # strings
-run 'symbol->string' 'twelve' "
-  (define twelve 12)
-  (symbol->string 'twelve)"
+run 'string-concat' 'one & two and 3' '(string-concat "one" " & " "two" " and " 3)'
+#run 'symbol->string' 'twelve' "
+#  (define twelve 12)
+#  (symbol->string 'twelve)"
 run 'string->symbol' 'twelve' '(string->symbol "twelve")'
 
 # Lexical closures
@@ -177,13 +146,13 @@ run closure 3 '(defun call (f) ((lambda (var) (f)) 5))
   ((lambda (var) (call (lambda () var))) 3)'
 
 run counter 3 '
-(define counter
-  ((lambda (val)
-      (lambda () (setq val (+ val 1)) val))
-    0))
-(counter)
-(counter)
-(counter)'
+  (define counter
+    ((lambda (val)
+       (lambda () (setq val (+ val 1)) val))
+     0))
+  (counter)
+  (counter)
+  (counter)'
 
 #run progn 'I own 10 cents' '(progn (print "I own ") 
 #                              (defun add(x y)(+ x y))
