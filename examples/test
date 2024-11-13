@@ -1,0 +1,74 @@
+; test include
+(load "examples/library.lisp")
+
+; Make a set (remove duplicates)
+(println(reduce (lambda (acc x) 
+          (if (member acc x)
+              acc
+              (cons x acc)))
+        '(1 2 2 3 1 4 3 5)
+        ()))
+
+; sort
+
+(println(quicksort '(3 1 4 1 5 9 2 8 5 3 5 8 9 8)))
+(println(quicksort '(3 1 4 1 5 9 2 8 5 3 5 8 9 8 12 35 48 453 75 90 53 90 456785 785 789)))
+(println(quicksort (iota 100)))
+(println(quicksort '(3 1 4 1 5 9 2 8 5 3 5 8 9 8)))
+(println(quicksort '(3 1 4 1 5 9 2 8 5 3 5 8 9 8 12 35 48 453 75 90 53 90 456785 785 789)))
+(println(quicksort (iota 100)))
+(println(quicksort '(3 1 4 1 5 9 2 8 5 3 5 8 9 8)))
+(println(quicksort '(3 1 4 1 5 9 2 8 5 3 5 8 9 8 12 35 48 453 75 90 53 90 456785 785 789)))
+(println(quicksort (reverse (iota 100))))
+(println(quicksort '(3 1 4 1 5 9 2 8 5 3 5 8 9 8)))
+(println(quicksort '(3 1 4 1 5 9 2 8 5 3 5 8 9 8 12 35 48 453 75 90 53 90 456785 785 789)))
+(println(reverse (iota 100)))
+(println(quicksort (reverse (iota 100))))
+
+(println(reduce (lambda (acc x) 
+          (if (member acc x)
+              acc
+              (cons x acc)))
+        '(1 2 2 3 1 4 3 5)
+        ()))
+
+(println(quicksort '(3 1 4 1 5 9 2 8 5 3 5 8 9 8)))
+(println(quicksort '(3 1 4 1 5 9 2 8 5 3 5 8 9 8 12 35 48 453 75 90 53 90 456785 785 789)))
+(println(quicksort (iota 100)))
+(println(quicksort '(3 1 4 1 5 9 2 8 5 3 5 8 9 8)))
+(println(quicksort '(3 1 4 1 5 9 2 8 5 3 5 8 9 8 12 35 48 453 75 90 53 90 456785 785 789)))
+(println(quicksort (iota 100)))
+(println(quicksort '(3 1 4 1 5 9 2 8 5 3 5 8 9 8)))
+(println(quicksort '(3 1 4 1 5 9 2 8 5 3 5 8 9 8 12 35 48 453 75 90 53 90 456785 785 789)))
+(println(quicksort (reverse (iota 100))))
+(println(quicksort '(3 1 4 1 5 9 2 8 5 3 5 8 9 8)))
+(println(quicksort '(3 1 4 1 5 9 2 8 5 3 5 8 9 8 12 35 48 453 75 90 53 90 456785 785 789)))
+(println(quicksort (reverse (iota 100))))
+
+(println(reduce (lambda (acc x) 
+          (if (member acc x)
+              acc
+              (cons x acc)))
+        '(1 2 2 3 1 4 3 5)
+        ()))
+        (println(quicksort (iota 100)))
+(println(quicksort '(3 1 4 1 5 9 2 8 5 3 5 8 9 8)))
+(println(quicksort '(3 1 4 1 5 9 2 8 5 3 5 8 9 8 12 35 48 453 75 90 53 90 456785 785 789)))
+(println(quicksort (iota 100)))
+(println(quicksort '(3 1 4 1 5 9 2 8 5 3 5 8 9 8)))
+(println(quicksort '(3 1 4 1 5 9 2 8 5 3 5 8 9 8 12 35 48 453 75 90 53 90 456785 785 789)))
+(println(quicksort (iota 100)))
+(println(quicksort '(3 1 4 1 5 9 2 8 5 3 5 8 9 8)))
+(println(quicksort '(3 1 4 1 5 9 2 8 5 3 5 8 9 8 12 35 48 453 75 90 53 90 456785 785 789)))
+(println(quicksort (reverse (iota 100))))
+(println(quicksort '(3 1 4 1 5 9 2 8 5 3 5 8 9 8)))
+(println(quicksort '(3 1 4 1 5 9 2 8 5 3 5 8 9 8 12 35 48 453 75 90 53 90 456785 785 789)))
+(println(quicksort (reverse (iota 100))))
+
+(println(reduce (lambda (acc x) 
+          (if (member acc x)
+              acc
+              (cons x acc)))
+        '(1 2 2 3 1 4 3 5)
+        ()))
+        

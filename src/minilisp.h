@@ -44,7 +44,7 @@ typedef struct Obj {
 
     // The total size of the object, including "type" field, this field, the contents, and the
     // padding at the end of the object.
-    int size;
+    unsigned int size;
 
     int line_num;  // The Lisp line where object was created
 
@@ -85,6 +85,6 @@ typedef struct {
 } filepos_t;
 
 void init_minilisp(Obj **env);
-int eval_input(char *input, Obj **env, Obj **expr);
+int eval_input(void *input, Obj **env, Obj **expr);
 
 #endif // _MINILISP_H_

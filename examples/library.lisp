@@ -5,7 +5,9 @@
 (defun list (x . y)
   (cons x y))
 
-
+(defmacro progn (expr . rest)
+  (list (cons 'lambda (cons () (cons expr rest)))))
+  
 ;; (and e1 e2 ...)
 ;; => (if e1 (and e2 ...))
 ;; (and e1)

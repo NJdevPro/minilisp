@@ -104,73 +104,6 @@ void minilisp(char *text, size_t length, bool with_repl, Obj **env, Obj **expr) 
 
 void error(char *fmt, ...);
 
-static size_t read_file(char *fname, char **text) {
-    size_t length = 0;
-    FILE *f = fopen(fname, "r");
-    if (!f) {
-        error("Failed to load file %s", filepos.line_num, fname);
-        return 0;
-    }
-
-    fseek(f, 0, SEEK_END);
-    length = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    
-    *text = malloc(length + 1);
-    if (!*text) {
-        error("Out of memory.", filepos.line_num);
-        fclose(f);
-        return 0;
-    }
-
-    size_t read = fread(*text, 1, length, f);
-    if (read != length) {
-        error("Failed to read entire file", filepos.line_num);
-        free(*text);
-        *text = NULL;
-        fclose(f);
-        return 0;
-    }
-
-    (*text)[length] = '\0';
-    fclose(f);
-    return length;
-}
-
-void process_file(char *fname, Obj **env, Obj **expr) {
-    char *text;
-    size_t len = read_file(fname, &text);
-    if (len == 0) return;
-    
-    filepos.filename = strdup(fname);
-    filepos.file_len = len;
-    filepos.line_num = 1;
-
-    // Save old stdin
-    FILE *old_stdin = stdin;
-    // Create a single stream for the entire file
-    FILE *stream = fmemopen(text, len, "r");
-    if (!stream) {
-        free(text);
-        error("Failed to create memory stream for %s", filepos.line_num, fname);
-        return;
-    }
-
-    // Redirect stdin to the memory stream
-    stdin = stream;
-
-    // Process expressions until we reach end of file
-    while (!feof(stream)) {
-        eval_input(text, env, expr);
-    }
-
-    // Cleanup
-    stdin = old_stdin;
-    fclose(stream);
-    free(text);
-    //if (filepos.filename) free(filepos.filename);
-}
-
 static bool no_history = false;
 static char *one_liner = NULL;
 static int num_files = 0;
@@ -266,7 +199,7 @@ int main(int argc, char **argv) {
 
     parse_args(argc, argv);
 
-    DEFINE2(env, expr);
+    DEFINE2(gc_root, env, expr);
     init_minilisp(env);
 
     for (int i = 0; i < num_files; i++) {
