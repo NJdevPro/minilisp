@@ -476,6 +476,12 @@ static Obj *prim_quote(void *root, Obj **env, Obj **list) {
     return (*list)->car;
 }
 
+static Obj *prim_atom(void *root, Obj **env, Obj **list) {
+    if (length(*list) != 1)
+        error("atom takes ontly 1 argument", (*list)->line_num);
+    return ((*list)->car->type != TCELL) ? True : Nil;
+}
+
 // (cons expr expr)
 static Obj *prim_cons(void *root, Obj **env, Obj **list) {
     if (length(*list) != 2)
@@ -679,6 +685,10 @@ static Obj *prim_println(void *root, Obj **env, Obj **list) {
     prim_print(root, env, list);
     fputc('\n', stdout);
     return Nil;
+}
+
+static Obj *prim_progn(void *root, Obj **env, Obj **list) {
+    return progn(root, env, list);
 }
 
 // (if expr expr expr ...)
@@ -965,7 +975,9 @@ static void define_primitives(void *root, Obj **env) {
     add_primitive(root, env, "defmacro", prim_defmacro);
     add_primitive(root, env, "macroexpand", prim_macroexpand);
     add_primitive(root, env, "lambda", prim_lambda);
+    add_primitive(root, env, "atom", prim_atom);
     add_primitive(root, env, "if", prim_if);
+    add_primitive(root, env, "progn", prim_progn);
     add_primitive(root, env, "=", prim_num_eq);
     add_primitive(root, env, "eq", prim_eq);
     add_primitive(root, env, "print", prim_print);
