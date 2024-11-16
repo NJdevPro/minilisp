@@ -6,7 +6,8 @@
 #include <sys/mman.h>
 #include "gc.h"
 
-extern void error(char *fmt, ...);
+extern void error(char *fmt, int line_num, ...);
+extern filepos_t filepos;
 
 // The pointer pointing to the beginning of the current heap
 void *memory;
@@ -15,7 +16,7 @@ void *memory;
 static void *from_space;
 
 // The number of bytes allocated from the heap
-static size_t mem_nused = 0;
+size_t mem_nused = 0;
 
 // Flags to debug GC
  bool gc_running = false;
@@ -63,7 +64,7 @@ Obj *alloc(void *root, int type, size_t size) {
     // Terminate the program if we couldn't satisfy the memory request. This can happen if the
     // requested size was too large or the from-space was filled with too many live objects.
     if (MEMORY_SIZE < mem_nused + size)
-        error("Memory exhausted");
+        error("Memory exhausted", filepos.line_num);
 
     // Allocate the object.
     Obj *obj = memory + mem_nused;
@@ -113,6 +114,11 @@ static inline Obj *forward(Obj *obj) {
 
 void *alloc_semispace() {
     return mmap(NULL, MEMORY_SIZE, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+}
+
+void free_semispace(void *ptr){
+    if (ptr) munmap(ptr, MEMORY_SIZE);
+    mem_nused = 0;
 }
 
 // Copies the root objects.
