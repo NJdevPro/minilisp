@@ -49,6 +49,8 @@ char *hints(const char *buf, const char **ansi1, const char **ansi2) {
     return NULL;
 }
 
+extern void reset_minilisp(Obj **env);
+
 // This struct keeps track of the current file/line being evaluated
 filepos_t filepos = {"", 0, 1};
 
@@ -83,15 +85,29 @@ void minilisp(char *text, size_t length, bool with_repl, Obj **env, Obj **expr) 
             // Redirect stdin to the in memory stream in order to use getchar()
             stdin = stream;
 
-            usleep(10000);
+            //usleep(10000);
             
             if (line[0] != '\0' && line[0] != '/') {
                 eval_input(line, env, expr);
                 bestlineHistoryAdd(line);
                 bestlineHistorySave("history.txt");
             } else if (line[0] == '/') {
-                fputs("Unreconized command: ", stdout);
-                fputs(line, stdout);
+                if (!strncmp(line, "/memory", 7)){
+                    extern size_t mem_nused;
+                    printf("Memory used: %ld / Total: %d\n", mem_nused, MEMORY_SIZE);
+                }
+                else if (!strncmp(line, "/reset", 6)){
+                    DEFINE1(gc_root, env);
+                    reset_minilisp(env);
+                }
+                else if (!strncmp(line, "/help", 5)){
+                    puts("Type Ctrl-C to quit.");
+                    puts("/memory to display the amount of memory used.");
+                    puts("/reset to flush the interpreter objects.");
+                }
+                else {
+                    printf("Unreconized command: %s", line);
+                }
                 putchar('\n');
             }
 
@@ -102,7 +118,6 @@ void minilisp(char *text, size_t length, bool with_repl, Obj **env, Obj **expr) 
         }
 }
 
-void error(char *fmt, ...);
 
 static bool no_history = false;
 static char *one_liner = NULL;
@@ -167,8 +182,13 @@ void parse_args(int argc, char **argv) {
 
             case 'h':
             case 303: // --help
-                printf("HELP\n");
-                break;
+                puts("minilisp [-r -x -h] FILE1 FILE2 ...\n");
+                puts("Run the Lisp files FILE1, FILE2, ... in that order,");
+                puts("and enter the read-eval-print loop once finished.");
+                puts("-r | --no-repl    : don't enter the read-eval-print loop.");
+                puts("-x | --exec       : execute lisp code passed as argument.");
+                puts("-h | --help       : print this help.");
+                exit(0);
 
             case '?': // unknown option
                 printf("Unknown option '%c'\n", option.opt);
@@ -200,10 +220,11 @@ int main(int argc, char **argv) {
     parse_args(argc, argv);
 
     DEFINE2(gc_root, env, expr);
-    init_minilisp(env);
+    reset_minilisp(env);
 
     for (int i = 0; i < num_files; i++) {
         printf("Loading %s\n", filenames[i]);
+        void process_file(char *fname, Obj **env, Obj **expr);
         process_file(filenames[i], env, expr);
         free(filenames[i]);
     }

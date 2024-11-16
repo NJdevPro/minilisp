@@ -84,6 +84,8 @@ typedef struct {
     int line_num;
 } filepos_t;
 
+void error(char *fmt, int line_num, ...);
+
 void init_minilisp(Obj **env);
 int eval_input(void *input, Obj **env, Obj **expr);
 
