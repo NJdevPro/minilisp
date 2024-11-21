@@ -78,31 +78,17 @@ CTRL-Z         SUSPEND PROCESS
 ```
 
 The REPL also saves the history of commands in the file history.txt
-<<<<<<< HEAD
-=======
+This file is loaded at startup, so one can recall previous commands.
 
 Known bugs:
 * Operators "and" and "or" do not work like their typical Lisp counterpart 
 because they evaluate all their operands at the same time instead of one
 by one.
-
-
-Original README
-=======
->>>>>>> 0822c20 (Update README)
-This file is loaded at startup, so one can recall previous commands.
-
-Future improvements:
-- floating point numbers
-- data files
-
-Known bugs:
 * the paste function does not work very well.
 * recall of multiline commands does not work as expected. 
 
-
 Original README (completed)
----------------
+===============
 
 One day I wanted to see what I can do with 1k lines of C and
 decided to write a Lisp interpreter. That turned to be a
