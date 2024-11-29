@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -x
 
 function fail() {
   echo -n -e '\e[1;31m[ERROR]\e[0m '
@@ -7,13 +7,13 @@ function fail() {
 }
 
 function do_run() {
-  error=$(echo "$3" | ./minilisp 2>&1 > /dev/null)
+  error=$(echo "$3" | ./minilisp -r -x "${3}" 2>&1 > /dev/null)
   if [ -n "$error" ]; then
     echo FAILED
     fail "$error"
   fi
 
-  result=$(echo "$3" | ./minilisp 2> /dev/null | tail -1)
+  result=$(echo "$3" | ./minilisp -r -x "${3}" 2> /dev/null | tail -1)
   if [ "$result" != "$2" ]; then
     echo FAILED
     fail "$2 expected, but got $result"
@@ -136,9 +136,9 @@ run restargs '(3)'    '(defun f (x . y) (cons x y)) (f 3)'
 
 # strings
 run 'string-concat' 'one & two and 3' '(string-concat "one" " & " "two" " and " 3)'
-#run 'symbol->string' 'twelve' "
-#  (define twelve 12)
-#  (symbol->string 'twelve)"
+run 'symbol->string' 'twelve' "
+  (define twelve 12)
+  (symbol->string 'twelve)"
 run 'string->symbol' 'twelve' '(string->symbol "twelve")'
 
 # Lexical closures
@@ -154,9 +154,10 @@ run counter 3 '
   (counter)
   (counter)'
 
-#run progn 'I own 10 cents' '(progn (print "I own ") 
-#                              (defun add(x y)(+ x y))
-#                              (println (add 3 7) " cents"))'
+run progn 'I own 10 cents()' '(progn (print "I own ") 
+                              (defun add(x y)(+ x y))
+                              (print (add 3 7)) 
+                              (print " cents"))'
 
 # While loop
 run while 45 "
