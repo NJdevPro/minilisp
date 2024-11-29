@@ -28,10 +28,10 @@ void error(char *fmt, int line_num, ...) {
 }
 
 // Constants
-static Obj *True = &(Obj){ TTRUE };
-static Obj *Nil = &(Obj){ TNIL };
-static Obj *Dot = &(Obj){ TDOT };
-static Obj *Cparen = &(Obj){ TCPAREN };
+static Obj *True = &(Obj){ .type = TTRUE, .size = sizeof(Obj) };
+static Obj *Nil = &(Obj){ .type = TNIL, .size = sizeof(Obj) };
+static Obj *Dot = &(Obj){ .type = TDOT, .size = sizeof(Obj) };
+static Obj *Cparen = &(Obj){ .type = TCPAREN, .size = sizeof(Obj) };
 
 //======================================================================
 // Constructors
@@ -263,15 +263,8 @@ static Obj *read_string(void *root) {
 static Obj *read_expr(void *root) {
     for (;;) {
         char c = read_char();
-        if (c == '\n') {
-            if (peek() == '\r');
+        if (c == ' ' || c == '\n' || c == '\r' || c == '\t')
             continue;
-        }
-
-        if (c == ' ' || c == '\r' || c == '\t')
-            continue;
-        if (c == EOF)
-            return NULL;
         if (c == ';') {
             skip_line();
             continue;
@@ -292,6 +285,9 @@ static Obj *read_expr(void *root) {
             return make_int(root, -read_number(0));
         if (isalpha(c) || strchr(symbol_chars, c))
             return read_symbol(root, c);
+        if (c == EOF)
+            return NULL;
+
         error("Don't know how to handle %c", filepos.line_num, c);
     }
 }
@@ -808,9 +804,9 @@ static Obj *prim_macroexpand(void *root, Obj **env, Obj **list) {
 
 // (print ...)
 static Obj *prim_print(void *root, Obj **env, Obj **list) {
-    for (Obj *args = *list; args != Nil; args = args->cdr) {
-        print(eval(root, env, &(args->car)));
-    }
+    DEFINE1(root, tmp);
+    *tmp = (*list)->car;
+    print(eval(root, env, tmp));
     return Nil;
 }
 
@@ -1023,6 +1019,8 @@ static void define_primitives(void *root, Obj **env) {
     add_primitive(root, env, "while", prim_while);
     add_primitive(root, env, "gensym", prim_gensym);
     add_primitive(root, env, "not", prim_not);
+    add_primitive(root, env, "and", prim_and);
+    add_primitive(root, env, "or", prim_or);
     add_primitive(root, env, "+", prim_plus);
     add_primitive(root, env, "-", prim_minus);
     add_primitive(root, env, "*", prim_mult);
@@ -1060,20 +1058,16 @@ static void define_primitives(void *root, Obj **env) {
 
 extern void *memory;
 
-void reset_minilisp(Obj **env) {
+void init_minilisp(Obj **env) {
     // Memory allocation
-    extern void *memory;
     extern void *alloc_semispace();
-    extern void free_semispace(void *);
-    gc_root = NULL;
-    free_semispace(memory);
     memory = alloc_semispace();
 
     // Constants and primitives
     Symbols = Nil;
-    *env = make_env(gc_root, &Nil, &Nil);
-    define_constants(gc_root, env);
-    define_primitives(gc_root, env);
+    *env = make_env(NULL, &Nil, &Nil);
+    define_constants(NULL, env);
+    define_primitives(NULL, env);
 }
 
 int eval_input(void *root, Obj **env, Obj **expr) {

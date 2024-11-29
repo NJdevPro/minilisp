@@ -75,6 +75,7 @@ void minilisp(char *text, size_t length, bool with_repl, Obj **env, Obj **expr) 
     if (with_repl)
         for(int promptnum = 1;; promptnum++) {
             char prompt[15] = "";
+            filepos = (filepos_t){ .filename = "", .file_len = 0, .line_num = 1 };
             sprintf(prompt, "%d:", promptnum);
             char *line = bestline(prompt);
             if(line == NULL) continue;
@@ -96,14 +97,9 @@ void minilisp(char *text, size_t length, bool with_repl, Obj **env, Obj **expr) 
                     extern size_t mem_nused;
                     printf("Memory used: %ld / Total: %d\n", mem_nused, MEMORY_SIZE);
                 }
-                else if (!strncmp(line, "/reset", 6)){
-                    DEFINE1(gc_root, env);
-                    reset_minilisp(env);
-                }
                 else if (!strncmp(line, "/help", 5)){
                     puts("Type Ctrl-C to quit.");
                     puts("/memory to display the amount of memory used.");
-                    puts("/reset to flush the interpreter objects.");
                 }
                 else {
                     printf("Unreconized command: %s", line);
@@ -220,7 +216,7 @@ int main(int argc, char **argv) {
     parse_args(argc, argv);
 
     DEFINE2(gc_root, env, expr);
-    reset_minilisp(env);
+    init_minilisp(env);
 
     for (int i = 0; i < num_files; i++) {
         printf("Loading %s\n", filenames[i]);

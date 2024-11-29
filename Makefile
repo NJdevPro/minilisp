@@ -1,5 +1,5 @@
 CC=gcc
-CFLAGS=-std=gnu99 -g -Wall
+CFLAGS=-std=gnu99 -O2 -Wall -Wshadow -Wextra -Wno-unused-parameter
 LDFLAGS=
 
 .PHONY: clean test
