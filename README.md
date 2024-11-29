@@ -10,25 +10,30 @@ to the original program, while trying to keep the goal of simplicity and concise
 The whole program compiles to less than 100 kb without debugging symbols and should be 
 able to run on low powered devices.
 
-The whole program compiles to less than 100 kb and should be able to run on low powered devices.
 The added primitives:
-* strings
+* strings and conversion
 * predicates >, >=, <=, or, and, not,
-
-* functions length, reverse, progn, load.
+* functions atom, length, reverse, progn, load.
 
 This has the side effect of being much faster as well, since all these primitives are 
 compiled instead of being interpreted.
 
-Among the bells and whistles, I've added a REPL based on Justine Tunney (jart)'s bestline.
+Among the bells and whistles, I've added a Read-Eval-Print-Loop (REPL) based on Justine Tunney (jart)'s bestline.
 
 In this version, instead of passing a file using pipes, you simply pass the files as command parameters :
 ./minilisp f1 f2 etc
 
 The files all share the same environment, so all the symbols, functions and macros defined 
-in f1 can be reused in the following files. 
+in f1 can be reused in the following files. The REPL is summonned after execution, unless we pass the option
+-r to the command line, in which case the interpreted quits immediately at the end.
 
-## Shortcuts
+You can also pass a simple Lisp command as parameter:
+./minilisp -x "(+ 1 1)"
+
+The Lisp command will be evaluated and then the REPL is summonned. 
+However we can quit immediately after execution with -r (or --no-repl).
+
+## REPL Shortcuts
 
 ```
 CTRL-Enter     CONTINUE ON NEXT LINE
@@ -83,9 +88,9 @@ This file is loaded at startup, so one can recall previous commands.
 Known bugs:
 * Operators "and" and "or" do not work like their typical Lisp counterpart 
 because they evaluate all their operands at the same time instead of one
-by one.
-* the paste function does not work very well.
-* recall of multiline commands does not work as expected. 
+by one. You may use the versions in the library.lisp file to correct this behavior.
+* recall of multiline commands does not work as expected.
+* this doesn't have tail call optimization, so expect crashes with sometimes with surprisingly short lists. 
 
 Original README (completed)
 ===============
@@ -260,7 +265,8 @@ exhaustion error.
 
     ( progn (print "I own ")
             (defun add(x y)(+ x y))
-            (println (add 3 7) " cents") )  ; -> prints "I own 10 cents"
+            (print (add 3 7) 
+            (println " cents") )  ; -> prints "I own 10 cents"
 
 ### Equivalence test operators
 
@@ -405,15 +411,3 @@ than itself. Useful for writing a macro that introduces new identifiers.
 
 As in the traditional Lisp syntax, `;` (semicolon) starts a single line comment.
 The comment continues to the end of line.
-
-No GC Branch
-------------
-
-There is a MiniLisp branch from which the code for garbage collection has been
-stripped. The accepted language is the same, but the code is simpler than the
-master branch's one. The reader might want to read the nogc branch first, then
-proceed to the master branch, to understand the code step by step.
-
-The nogc branch is available at
-[nogc](https://github.com/rui314/minilisp/tree/nogc). The original is available
-at [master](https://github.com/rui314/minilisp).
