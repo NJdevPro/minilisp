@@ -85,19 +85,15 @@ CTRL-Z         SUSPEND PROCESS
 The REPL also saves the history of commands in the file history.txt
 This file is loaded at startup, so one can recall previous commands.
 
-Future improvements:
-- floating point numbers
-- data files
-- system calls
-
 Known bugs:
-* the paste function does not work very well.
+* Operators "and" and "or" do not work like their typical Lisp counterpart 
+because they evaluate all their operands at the same time instead of one
+by one. You may use the versions in the library.lisp file to correct this behavior.
 * recall of multiline commands does not work as expected.
-* this doesn't have tail call optimization, so expect crashes with sometimes surprisingly short lists. 
-
+* this doesn't have tail call optimization, so expect crashes with sometimes with surprisingly short lists. 
 
 Original README (completed)
----------------
+===============
 
 One day I wanted to see what I can do with 1k lines of C and
 decided to write a Lisp interpreter. That turned to be a
@@ -269,7 +265,8 @@ exhaustion error.
 
     ( progn (print "I own ")
             (defun add(x y)(+ x y))
-            (println (add 3 7) " cents") )  ; -> prints "I own 10 cents"
+            (print (add 3 7) 
+            (println " cents") )  ; -> prints "I own 10 cents"
 
 ### Equivalence test operators
 
@@ -414,15 +411,3 @@ than itself. Useful for writing a macro that introduces new identifiers.
 
 As in the traditional Lisp syntax, `;` (semicolon) starts a single line comment.
 The comment continues to the end of line.
-
-No GC Branch
-------------
-
-There is a MiniLisp branch from which the code for garbage collection has been
-stripped. The accepted language is the same, but the code is simpler than the
-master branch's one. The reader might want to read the nogc branch first, then
-proceed to the master branch, to understand the code step by step.
-
-The nogc branch is available at
-[nogc](https://github.com/rui314/minilisp/tree/nogc). The original is available
-at [master](https://github.com/rui314/minilisp).

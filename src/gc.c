@@ -116,11 +116,6 @@ void *alloc_semispace() {
     return mmap(NULL, MEMORY_SIZE, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
 }
 
-void free_semispace(void *ptr){
-    if (ptr) munmap(ptr, MEMORY_SIZE);
-    mem_nused = 0;
-}
-
 // Copies the root objects.
 static void forward_root_objects(void *root) {
     Symbols = forward(Symbols);
@@ -141,7 +136,7 @@ static bool getEnvFlag(char *name) {
 // http://en.wikipedia.org/wiki/Cheney%27s_algorithm
 void gc(void *root) {
     assert(!gc_running);
-    gc_running = true; // 開始垃圾蒐集
+    gc_running = true;
 
     // Debug flags
     debug_gc = getEnvFlag("MINILISP_DEBUG_GC");
