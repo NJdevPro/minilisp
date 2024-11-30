@@ -946,7 +946,7 @@ static size_t read_file(char *fname, char **text) {
     size_t length = 0;
     FILE *f = fopen(fname, "r");
     if (!f) {
-        error("Failed to load file %s", filepos.line_num, fname);
+        printf("Failed to load file %s\n", fname);
         return 0;
     }
 
@@ -957,14 +957,14 @@ static size_t read_file(char *fname, char **text) {
     
     *text = malloc(length + 1);
     if (!*text) {
-        error("Out of memory.", filepos.line_num);
+        puts("Out of memory.");
         fclose(f);
         return 0;
     }
 
     size_t read = fread(*text, 1, length, f);
     if (read != length) {
-        error("Failed to read entire file", filepos.line_num);
+        printf("Failed to read entire file %s\n", fname);
         free(*text);
         *text = NULL;
         fclose(f);

@@ -1,4 +1,4 @@
-#!/bin/bash -x
+#!/bin/bash
 
 function fail() {
   echo -n -e '\e[1;31m[ERROR]\e[0m '

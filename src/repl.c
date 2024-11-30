@@ -49,8 +49,6 @@ char *hints(const char *buf, const char **ansi1, const char **ansi2) {
     return NULL;
 }
 
-extern void reset_minilisp(Obj **env);
-
 // This struct keeps track of the current file/line being evaluated
 filepos_t filepos = {"", 0, 1};
 
@@ -85,8 +83,6 @@ void minilisp(char *text, size_t length, bool with_repl, Obj **env, Obj **expr) 
             FILE * stream = fmemopen(line, strlen(line), "r");
             // Redirect stdin to the in memory stream in order to use getchar()
             stdin = stream;
-
-            //usleep(10000);
             
             if (line[0] != '\0' && line[0] != '/') {
                 eval_input(line, env, expr);
