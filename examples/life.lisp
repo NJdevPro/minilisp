@@ -4,8 +4,8 @@
 
 (load "examples/library.lisp")
 
-(define width 10)
-(define height 10)
+(define width 15)
+(define height 15)
 
 ;; Returns location (x, y)'s element.
 (defun get (board x y)
@@ -44,24 +44,36 @@
            (or (= c 2) (= c 3))
          (= c 3))))
 
+(define iter 1)
+(define idx_height (iota height))
+(define idx_width (iota width))
+
 (defun run (board)
   (while t
     (print board)
-    (println '*)
-    (let newboard (map (iota height)
+    (if (= iter 100) 
+      (exit 0) 
+      (setq iter (+ 1 iter)))
+    (println iter)
+    (let newboard (map idx_height
                        (lambda (y)
-                         (map (iota width)
+                         (map idx_width
                               (lambda (x)
                                 (if (next board x y) '@ '_)))))
          (setq board newboard))))
 
-(run '((_ _ _ _ _ _ _ _ _ _)
-       (_ _ _ _ _ _ _ _ _ _)
-       (_ _ _ _ _ _ _ _ _ _)
-       (_ _ _ _ _ _ _ _ _ _)
-       (_ _ _ _ _ _ _ _ _ _)
-       (_ _ _ _ _ _ _ _ _ _)
-       (_ _ _ _ _ _ _ _ _ _)
-       (_ @ @ @ _ _ _ _ _ _)
-       (_ _ _ @ _ _ _ _ _ _)
-       (_ _ @ _ _ _ _ _ _ _)))
+(run '((_ _ _ _ _ _ _ _ _ _ _ _ _ _ _)
+       (_ _ _ _ _ _ _ _ _ _ _ _ _ _ _)
+       (_ _ _ _ _ _ _ _ _ _ _ _ _ _ _)
+       (_ _ _ _ _ _ _ _ _ _ _ _ _ _ _)
+       (_ _ _ _ _ _ _ _ @ _ _ _ _ _ _)
+       (_ _ _ _ _ _ _ @ @ @ _ _ _ _ _)
+       (_ _ _ _ @ @ _ @ @ _ _ _ _ _ _)
+       (_ _ _ _ _ _ _ @ @ @ _ _ _ _ _)
+       (_ _ _ _ _ _ _ _ @ _ _ _ _ _ _)
+       (_ _ _ _ _ _ _ _ @ _ _ _ _ _ _)
+       (_ _ _ _ _ _ _ _ _ _ _ _ _ _ _)
+       (_ _ _ _ _ _ _ _ _ _ _ _ _ _ _)
+       (_ @ @ @ _ _ _ _ _ _ _ _ _ _ _)
+       (_ _ _ @ _ _ _ _ _ _ _ _ _ _ _)
+       (_ _ @ _ _ _ _ _ _ _ _ _ _ _ _)))

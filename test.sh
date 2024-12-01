@@ -52,8 +52,17 @@ run '<' t '(< 2 3)'
 run '<' '()' '(< 3 3)'
 run '<' '()' '(< 4 3)'
 
+run list '(1 2 3 a b)' "(list 1 2 3 'a 'b)"
 run 'literal list' '(a b c)' "'(a b c)"
 run 'literal list' '(a b . c)' "'(a b . c)"
+
+run reverse '(3 2 1)' '(reverse 1 2 3)'
+run reverse "(3 2 1)" "(reverse '(1 2 3))"
+run reverse "cba" '(reverse "abc")'
+
+run length 5 '(length 1 2 3 4 5)'
+run length 5 "(length '(1 2 3 4 5))"
+run length 5 '(length "abcde")'
 
 # List manipulation
 run cons "(a . b)" "(cons 'a 'b)"
