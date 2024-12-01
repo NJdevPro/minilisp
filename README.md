@@ -12,11 +12,10 @@ able to run on low powered devices.
 
 The added primitives:
 * strings and conversion
-* predicates >, >=, <=, or, and, not,
-* functions atom, length, reverse, progn, load.
+* predicates >, >=, <=, not,
+* functions list, atom, length, reverse, progn, load.
 
-This has the side effect of being much faster as well, since all these primitives are 
-compiled instead of being interpreted.
+This has the side effect of being much faster as well, since all these primitives are compiled instead of being interpreted.
 
 Among the bells and whistles, I've added a Read-Eval-Print-Loop (REPL) based on Justine Tunney (jart)'s bestline.
 
@@ -86,9 +85,6 @@ The REPL also saves the history of commands in the file history.txt
 This file is loaded at startup, so one can recall previous commands.
 
 Known bugs:
-* Operators "and" and "or" do not work like their typical Lisp counterpart 
-because they evaluate all their operands at the same time instead of one
-by one. You may use the versions in the library.lisp file to correct this behavior.
 * recall of multiline commands does not work as expected.
 * this doesn't have tail call optimization, so expect crashes with sometimes with surprisingly short lists. 
 
@@ -180,8 +176,7 @@ car.
     (setcar cell 'x)
     cell  ; -> (x . b)
 
-`length` and `reverse` operate on a whole list or a string. They can also operate on their 
-arguments when their number is > 1.
+`length` and `reverse` operate either on their arguments, or a single list or a string.
 
     (length '(1 2 3))   ; -> 3
     (length 1 2 t)      ; -> 3
@@ -189,7 +184,7 @@ arguments when their number is > 1.
 
     (reverse '(a b c))  ; -> (c b a)
     (reverse "1234")    ; -> "4321" 
-    (reverse '((a) b "c")  ; -> ("c" b (a))
+    (reverse '((a) b "c"))  ; -> (c b (a))
 
 ### Numeric operators
 
@@ -222,26 +217,6 @@ the second.
     (< 4 3)    ; -> ()
 
 The other numerical predicates `>`, `<=`, `>=` work in a similar fashion.
-
-`and` takes two or more arguments, evaluates them, and returns the last argument
-that returns true, if all the arguments return true, or () otherwise.
-
-    (and 1 t 2)         ; -> 2
-    (and 1 t (- 3 4))   ; -> -1
-    (and 1 () 2)        ; -> ()
-    (and)               ; t
-
-`or` takes two or more arguments, evaluates them, and returns the first argument
-that returns true.
-
-    (or 1 () 2)  ; -> 1
-    (or () ())   ; -> ()
-    (or)         ; -> ()
-
-Nota Bene: because all the arguments are evaluated, `and` and `or` do not operate  
-like their counterparts written in Lisp, as those stop evaluation at the first 
-argument that returns. If the arguments have side effects, this may affect the 
-program differently.
 
 ### Conditionals
 
@@ -277,7 +252,7 @@ contents but actually different are considered to not be the same by `eq`.
 
 ### String functions
 
-`eq` compares two strings.
+`eq` can also compare two strings.
 
     (eq "Hello" "Hello")    ; -> t
     (eq "Hello" "hello")    ; -> ()

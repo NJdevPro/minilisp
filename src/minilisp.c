@@ -498,6 +498,13 @@ static Obj *eval(void *root, Obj **env, Obj **obj) {
 // Primitive functions and special forms
 //======================================================================
 
+// (list expr ...)
+static Obj *prim_list(void *root, Obj **env, Obj **list) {
+    DEFINE1(root, values);
+    *values = eval_list(root, env, list);  // Evaluate all arguments
+    return *values;                         // Return them as a list
+}
+
 // 'expr
 static Obj *prim_quote(void *root, Obj **env, Obj **list) {
     if (length(*list) != 1)
@@ -692,26 +699,6 @@ static Obj *prim_not(void *root, Obj **env, Obj **list) {
         error("not accepts 1 argument", (*list)->line_num);
     Obj *values = eval_list(root, env, list);
     return values->car == Nil ? True : Nil;
-}
-
-// (and ...)
-static Obj *prim_and(void *root, Obj **env, Obj **list) {
-    Obj *car = True;  // by default, return True if no args
-    for (Obj *args = eval_list(root, env, list); args != Nil; args = args->cdr) {
-        car = eval(root, env, &args->car);
-        if (car == Nil) break;
-    }
-    return car;
-}
-
-// (or ...)
-static Obj *prim_or(void *root, Obj **env, Obj **list) {
-    Obj *car = Nil;
-    for (Obj *args = eval_list(root, env, list); args != Nil; args = args->cdr) {
-        car = eval(root, env, &args->car);
-        if (car != Nil) break;
-    }
-    return car;
 }
 
 extern void process_file(char *fname, Obj **env, Obj **expr);
@@ -1010,6 +997,7 @@ void process_file(char *fname, Obj **env, Obj **expr) {
 }
 
 static void define_primitives(void *root, Obj **env) {
+    add_primitive(root, env, "list", prim_list);
     add_primitive(root, env, "quote", prim_quote);
     add_primitive(root, env, "cons", prim_cons);
     add_primitive(root, env, "car", prim_car);
@@ -1019,8 +1007,6 @@ static void define_primitives(void *root, Obj **env) {
     add_primitive(root, env, "while", prim_while);
     add_primitive(root, env, "gensym", prim_gensym);
     add_primitive(root, env, "not", prim_not);
-    add_primitive(root, env, "and", prim_and);
-    add_primitive(root, env, "or", prim_or);
     add_primitive(root, env, "+", prim_plus);
     add_primitive(root, env, "-", prim_minus);
     add_primitive(root, env, "*", prim_mult);
