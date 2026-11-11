@@ -11,6 +11,7 @@
 #include <setjmp.h>
 #include <string.h>
 #include <sys/resource.h>
+#include <unistd.h>
 #include "minilisp.h"
 #include "gc.h"
 
@@ -781,13 +782,32 @@ static Obj *prim_not(void *root, Obj **env, Obj **list) {
     return values->car == Nil ? True : Nil;
 }
 
+// Returns a newly allocated path for a file to load. A relative path is first looked up in the
+// directory of the file being loaded, then in the current directory.
+__attribute__((noinline)) static char *resolve_path(const char *name) {
+    const char *current = filepos.filename;
+    const char *slash = current ? strrchr(current, '/') : NULL;
+    if (name[0] != '/' && slash) {
+        size_t dirlen = slash - current + 1;
+        char *path = malloc(dirlen + strlen(name) + 1);
+        if (path) {
+            memcpy(path, current, dirlen);
+            strcpy(path + dirlen, name);
+            if (access(path, R_OK) == 0)
+                return path;
+            free(path);
+        }
+    }
+    return strdup(name);
+}
+
 static Obj *prim_load(void *root, Obj **env, Obj **list) {
     DEFINE1(root, expr);
     Obj *args = eval_list(root, env, list);
     if (length(args) != 1 || args->car->type != TSTRING)
         error("load: filename must be a string", (*list)->line_num);
     // The name must be copied: the string lives in the GC heap and would move.
-    char *name = strdup(args->car->name);
+    char *name = resolve_path(args->car->name);
     if (!name)
         error("Out of memory in load", (*list)->line_num);
 
