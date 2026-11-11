@@ -891,20 +891,22 @@ static Obj *prim_macroexpand(void *root, Obj **env, Obj **list) {
     return macroexpand(root, env, body);
 }
 
-// (print expr)
+// (print expr ...)
+// Evaluates and prints each argument, separated by a space.
 static Obj *prim_print(void *root, Obj **env, Obj **list) {
-    if (length(*list) != 1)
-        error("print takes 1 argument", (*list)->line_num);
-    DEFINE1(root, tmp);
-    *tmp = (*list)->car;
-    print(eval(root, env, tmp));
+    DEFINE2(root, lp, tmp);
+    for (*lp = *list; (*lp)->type == TCELL; *lp = (*lp)->cdr) {
+        if (*lp != *list)
+            fputc(' ', stdout);
+        *tmp = (*lp)->car;
+        print(eval(root, env, tmp));
+    }
     return Nil;
 }
 
-// (println | println expr)
+// (println expr ...)
 static Obj *prim_println(void *root, Obj **env, Obj **list) {
-    if (*list != Nil)
-        prim_print(root, env, list);
+    prim_print(root, env, list);
     fputc('\n', stdout);
     return Nil;
 }

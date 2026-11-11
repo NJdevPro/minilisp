@@ -12,8 +12,9 @@ able to run on low powered devices.
 
 The added primitives:
 * strings and conversion
+* operators *, /, mod
 * predicates >, >=, <=, not,
-* functions list, atom, length, reverse, progn, load.
+* functions list, atom, length, reverse, progn, print, println, load, exit, gensym.
 
 This has the side effect of being much faster as well, since all these primitives are compiled instead of being interpreted.
 
@@ -23,14 +24,26 @@ In this version, instead of passing a file using pipes, you simply pass the file
 ./minilisp f1 f2 etc
 
 The files all share the same environment, so all the symbols, functions and macros defined 
-in f1 can be reused in the following files. The REPL is summonned after execution, unless we pass the option
--r to the command line, in which case the interpreted quits immediately at the end.
+in f1 can be reused in the following files. The REPL is started after execution, unless we pass the option
+-r to the command line, in which case the interpreter quits immediately at the end.
 
 You can also pass a simple Lisp command as parameter:
 ./minilisp -x "(+ 1 1)"
 
-The Lisp command will be evaluated and then the REPL is summonned. 
+The Lisp command will be evaluated and then the REPL is started. 
 However we can quit immediately after execution with -r (or --no-repl).
+
+The options, which can be given before or after the file names, are:
+
+```
+-x, --exec CODE   evaluate the Lisp code CODE
+-r, --no-repl     don't enter the read-eval-print loop
+-H, --no-history  don't load nor save the history of the REPL
+-h, --help        print the help and exit
+```
+
+When an expression fails, the error is reported on the standard error output
+as `file[line]: message` and the evaluation goes on with the next expression.
 
 ## REPL Shortcuts
 
@@ -81,12 +94,22 @@ CTRL-X CTRL-X  GOTO MARK
 CTRL-Z         SUSPEND PROCESS
 ```
 
+CTRL-D on an empty line leaves the REPL. Lines starting with a slash are REPL commands:
+
+```
+/memory        display the amount of memory used and the size of the heap
+/help          display a short help
+```
+
 The REPL also saves the history of commands in the file history.txt
-This file is loaded at startup, so one can recall previous commands.
+This file is loaded at startup, so one can recall previous commands
+(unless the option -H is given).
 
 Known bugs:
 * recall of multiline commands does not work as expected.
-* this doesn't have tail call optimization, so expect crashes with sometimes with surprisingly short lists. 
+* this doesn't have tail call optimization, and each call uses a good deal of
+  the C stack. A recursion deeper than a few thousand calls stops with the error
+  "Stack overflow: the recursion is too deep".
 
 Original README (completed)
 ===============
@@ -127,12 +150,20 @@ MiniLisp comes with a comprehensive test suite. In order to run the tests, give
 
     $ make test
 
+The tests run twice, the second time with the environment variable
+`MINILISP_ALWAYS_GC=1`, which makes the garbage collector run at every memory
+allocation and makes the old heap inaccessible, so that any stale pointer
+crashes immediately. `MINILISP_DEBUG_GC=1` prints a line on the standard error
+output at each collection. The heap starts at 4 MB (per semi-space) and doubles
+when more than half of it is still in use after a collection.
+
 Language features
 -----------------
 
 MiniLisp is a traditional Lisp interpreter. It reads one expression at a time
-from the standard input, evaluates it, and then prints out the return value of
-the expression. Here is an example of a valid input.
+from a file, from the `-x` option or from the REPL, evaluates it, and then
+prints out the return value of the expression. Here is an example of a valid
+input.
 
     (+ 1 2)
 
@@ -140,15 +171,16 @@ The above expression prints "3".
 
 ### Literals
 
-MiniLisp supports integer literals, `()`, `t`, symbols, and list literals.
+MiniLisp supports integer literals, string literals, `()`, `t`, symbols, and
+list literals.
 
-* Integer literals are positive or negative integers.
+* Integer literals are positive or negative 64 bit integers.
+* String literals are written between double quotes. The escape sequences `\n`,
+  `\t`, `\r`, `\"` and `\\` are recognized.
 * `()` is the only false value. It also represents the empty list.
 * `t` is a predefined variable evaluated to itself. It's a preferred way to
   represent a true value, while any non-`()` value is considered to be true.
 * Symbols are objects with unique name. They are used to represent identifiers.
-  Because MiniLisp does not have string type, symbols are sometimes used as a
-  substitute for strings too.
 * List literals are cons cells. It's either a regular list whose last element's
   cdr is `()` or an dotted list ending with any non-`()` value. A dotted list is
   written as `(a . b)`.
@@ -177,22 +209,33 @@ car.
     cell  ; -> (x . b)
 
 `length` and `reverse` operate either on their arguments, or a single list or a string.
+`reverse` never modifies its arguments: it returns a new list or a new string.
 
     (length '(1 2 3))   ; -> 3
     (length 1 2 t)      ; -> 3
     (length "1 2 3")    ; -> 5
 
     (reverse '(a b c))  ; -> (c b a)
+    (reverse 1 2 3)     ; -> (3 2 1)
     (reverse "1234")    ; -> "4321" 
     (reverse '((a) b "c"))  ; -> (c b (a))
 
 ### Numeric operators
 
+Integers are 64 bit signed integers. The result of an operation that overflows
+wraps around. Numeric operators only accept integers.
+
 `+` returns the sum of the arguments.
 
+    (+)        ; -> 0
     (+ 1)      ; -> 1
     (+ 1 2)    ; -> 3
     (+ 1 2 3)  ; -> 6
+
+`*` returns the product of the arguments.
+
+    (*)        ; -> 1
+    (* 2 3 4)  ; -> 24
 
 `-` negates the value of the argument if only one argument is given.
 
@@ -203,6 +246,15 @@ If multiple arguments are given, `-` subtracts each argument from the first one.
 
     (- 5 2)    ; -> 3
     (- 5 2 7)  ; -> -4
+
+`/` divides the first argument by each of the following ones, and `mod` returns
+the remainder of the same division. The division of integers is truncated
+towards zero. Dividing by zero is an error.
+
+    (/ 7 2)    ; -> 3
+    (/ -7 2)   ; -> -3
+    (mod 7 2)  ; -> 1
+    (mod -7 2) ; -> -1
 
 `=` takes two arguments and returns `t` if the two are the same integer.
 
@@ -220,9 +272,10 @@ The other numerical predicates `>`, `<=`, `>=` work in a similar fashion.
 
 ### Conditionals
 
-`(if cond then else)` is the only conditional in the language. It first
+`(if cond then else ...)` is the only conditional in the language. It first
 evaluates *cond*. If the result is a true value, *then* is evaluated. Otherwise
-*else* is evaluated.
+the *else* expressions are evaluated in sequence, and the value of the last one
+is returned (`()` if there is none).
 
 ### Loops
 
@@ -231,28 +284,32 @@ evaluates *cond*. If the result is a true value, *then* is evaluated. Otherwise
 
 If you are familiar with Scheme, you might be wondering if you could write a
 loop by tail recursion in MiniLisp. The answer is no. Tail calls consume stack
-space in MiniLisp, so a loop written as recursion will fail with the memory
-exhaustion error.
+space in MiniLisp, so a loop written as recursion will fail with the "Stack
+overflow" error after a few thousand iterations.
 
 ### Imperative programming
 
 `(progn expr expr ...)` executes several expressions in sequence.
 
-    ( progn (print "I own ")
-            (defun add(x y)(+ x y))
-            (print (add 3 7) 
-            (println " cents") )  ; -> prints "I own 10 cents"
+    (progn (print "I own ")
+           (defun add (x y) (+ x y))
+           (print (add 3 7))
+           (println " cents"))  ; -> prints "I own 10 cents"
 
 ### Equivalence test operators
 
-`eq` takes two arguments and returns `t` if the objects are the same. What `eq`
-really does is a pointer comparison, so two objects happened to have the same
-contents but actually different are considered to not be the same by `eq`.
-`eq` can also compare two strings.
+`eq` takes two arguments and returns `t` if the objects are the same. Integers
+are compared by value and strings by content. For all the other objects `eq` does
+a pointer comparison, so two lists that happened to have the same contents but
+are actually different are considered to not be the same by `eq`.
+
+    (eq 1000 1000)          ; -> t
+    (eq 'a 'a)              ; -> t
+    (eq '(1) '(1))          ; -> ()
 
 ### String functions
 
-`eq` can also compare two strings.
+`eq` compares strings by content.
 
     (eq "Hello" "Hello")    ; -> t
     (eq "Hello" "hello")    ; -> ()
@@ -273,13 +330,15 @@ contents but actually different are considered to not be the same by `eq`.
 
 ### Output operators
 
-`print` prints a given object to the standard output.
+`print` prints its arguments to the standard output, separated by a space.
+Strings are printed without the quotes.
 
     (print 3)               ; -> "3"
     (print '(hello world))  ; -> "(hello world)"
     (print "hello" "world") ; -> "hello world"
 
-`println` does the same, adding a return at the end.
+`println` does the same, adding a return at the end. Without argument, it only
+prints a return.
 
 ### Definitions
 
@@ -297,7 +356,7 @@ you can assign to a variable using `define`.
     ((lambda (x) (+ x x)) 6)  ; do the same thing without assignment
 
 The other way is `defun`. `(defun fn (args ...) expr ...)` is short for
-`(define fn (lambda (args ...) expr ...)`.
+`(define fn (lambda (args ...) expr ...))`.
 
     ;; Define "double" using defun
     (defun double (x) (+ x x))
@@ -312,10 +371,12 @@ parameter as a list.
 
 Variables are lexically scoped and have indefinite extent. References to "outer"
 variables remain valid even after the function that created the variables
-returns.
+returns. Calling a function with more or fewer arguments than it has
+parameters is an error, unless the last parameter is a dotted one as above.
 
     ;; A countup function. We use lambda to introduce local variables because we
-    ;; do not have "let" and the like.
+    ;; do not have "let" and the like. (The file examples/library.lisp defines
+    ;; "let", "when", "and", "or" etc. as macros).
     (define counter
       ((lambda (count)
          (lambda ()
@@ -347,8 +408,12 @@ is not defined.
 ### System functions
 `load` loads a Lisp file and evaluates all its content, adding it to the environment.
 
-    (load "example/nqueens.lisp") -> run the file and store its evaluated functions
-                                     and macros
+    (load "examples/nqueens.lisp") -> run the file and store its evaluated functions
+                                      and macros
+
+A relative path is first looked up in the directory of the file that calls `load`,
+then in the current directory. For instance, `(load "./library.lisp")` in
+examples/hanoi.lisp loads examples/library.lisp, wherever minilisp is started from.
 
 `exit` quits the interpreter and returns the integer passed as parameter.
 
@@ -380,7 +445,7 @@ the control is passed to the function.
 `gensym` creates a new symbol which will never be `eq` to any other symbol other
 than itself. Useful for writing a macro that introduces new identifiers.
 
-    (gensym)   ; -> a new symbol
+    (gensym)   ; -> a new symbol, such as G__0
 
 ### Comments
 
