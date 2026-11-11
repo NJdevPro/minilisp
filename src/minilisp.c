@@ -75,8 +75,9 @@ static Obj *cons(void *root, Obj **car, Obj **cdr) {
 }
 
 static Obj *make_symbol(void *root, const char *name) {
-    Obj *sym = alloc(root, TSYMBOL, strlen(name) + 1);
-    strcpy(sym->name, name);
+    Obj *sym = alloc(root, TSYMBOL, sizeof(Obj *) + strlen(name) + 1);
+    sym->bind = NULL;
+    strcpy(sym->sym_name, name);
     sym->line_num = filepos.line_num;
     return sym;
 }
@@ -241,7 +242,7 @@ static Obj *read_list(void *root) {
 // but return the existing one.
 static Obj *intern(void *root, const char *name) {
     for (Obj *p = Symbols; p != Nil; p = p->cdr)
-        if (strcmp(name, p->car->name) == 0)
+        if (strcmp(name, p->car->sym_name) == 0)
             return p->car;
     DEFINE1(root, sym);
     *sym = make_symbol(root, name);
@@ -360,7 +361,7 @@ static void print(Obj *obj) {
 
     case TINT   : printf("%lld", obj->value);
         break;
-    case TSYMBOL: fputs(obj->name, stdout);
+    case TSYMBOL: fputs(obj->sym_name, stdout);
         break;
     case TPRIMITIVE: fputs("<primitive>", stdout);
         break;
@@ -403,8 +404,24 @@ static int length(Obj *list) {
 
 static Obj *eval(void *root, Obj **env, Obj **obj);
 
+// The global environment is the frame at the top of the chain of frames, the only one which has no
+// parent. Its variables are not in the frame itself, they are stored in the symbols.
+static inline bool is_global(Obj *env) {
+    return env->up == Nil;
+}
+
 static void add_variable(void *root, Obj **env, Obj **sym, Obj **val) {
     DEFINE2(root, vars, tmp);
+    if (is_global(*env)) {
+        // Redefining a variable just changes its value: the symbol is the only way to reach it.
+        if ((*sym)->bind) {
+            (*sym)->bind->cdr = *val;
+        } else {
+            *tmp = cons(root, sym, val);
+            (*sym)->bind = *tmp;
+        }
+        return;
+    }
     *vars = (*env)->vars;
     *tmp = acons(root, sym, val, vars);
     (*env)->vars = *tmp;
@@ -485,14 +502,17 @@ static Obj *apply(void *root, Obj **env, Obj **fn, Obj **args) {
 
 // Searches for a variable by symbol. Returns null if not found.
 static Obj *find(Obj **env, Obj *sym) {
-    for (Obj *p = *env; p != Nil; p = p->up) { // search all environments
+    // Search the local environments first...
+    Obj *p = *env;
+    for (; !is_global(p); p = p->up) {
         for (Obj *cell = p->vars; cell != Nil; cell = cell->cdr) {
             Obj *bind = cell->car;
             if (sym == bind->car)
                 return bind;
         }
     }
-    return NULL;
+    // ...then the global one, which is stored in the symbol.
+    return sym->bind;
 }
 
 // Expands the given macro application form.
@@ -524,7 +544,7 @@ static Obj *eval(void *root, Obj **env, Obj **obj) {
         // Variable
         Obj *bind = find(env, *obj);
         if (!bind) {
-            error("Undefined symbol: %s", (*obj)->line_num, (*obj)->name);
+            error("Undefined symbol: %s", (*obj)->line_num, (*obj)->sym_name);
         }
         return bind->cdr;
     }
@@ -537,7 +557,7 @@ static Obj *eval(void *root, Obj **env, Obj **obj) {
             // to call.
             Obj *bind = find(env, (*obj)->car);
             if (!bind)
-                error("Undefined symbol: %s", (*obj)->car->line_num, (*obj)->car->name);
+                error("Undefined symbol: %s", (*obj)->car->line_num, (*obj)->car->sym_name);
             *fn = bind->cdr;
             if ((*fn)->type == TMACRO) {
                 *expanded = apply_func(root, env, fn, args);
@@ -615,7 +635,7 @@ static Obj *prim_setq(void *root, Obj **env, Obj **list) {
     DEFINE2(root, bind, value);
     *bind = find(env, (*list)->car);
     if (!*bind)
-        error("Unbound variable %s", (*list)->line_num, (*list)->car->name);
+        error("Unbound variable %s", (*list)->line_num, (*list)->car->sym_name);
     *value = (*list)->cdr->car;
     *value = eval(root, env, value);
     (*bind)->cdr = *value;
@@ -1000,7 +1020,7 @@ static Obj *prim_symbol_to_string(void *root, Obj **env, Obj **list) {
 
     // The name is copied out of the GC heap before allocating
     char name[SYMBOL_MAX_LEN + 1];
-    strncpy(name, args->car->name, sizeof(name) - 1);
+    strncpy(name, args->car->sym_name, sizeof(name) - 1);
     name[sizeof(name) - 1] = '\0';
     return make_string(root, name);
 }

@@ -57,8 +57,15 @@ typedef struct Obj {
             struct Obj *car;
             struct Obj *cdr;
         };
-        // Symbol
+        // String
         char name[1];
+        // Symbol: the binding of the symbol in the global environment, i.e. the pair
+        // (symbol . value), or NULL if the symbol is not defined globally. Keeping it in the
+        // symbol makes the lookup of global variables and functions independent of their number.
+        struct {
+            struct Obj *bind;
+            char sym_name[];
+        };
         // Primitive
         Primitive *fn;
         // Function or Macro
