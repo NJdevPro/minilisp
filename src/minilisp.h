@@ -1,6 +1,8 @@
 #ifndef _MINILISP_H_
 #define _MINILISP_H_
 
+#include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdarg.h>
 #include <stdlib.h>
@@ -38,15 +40,20 @@ typedef struct Obj *Primitive(void *root, struct Obj **env, struct Obj **args);
 
 // The object type
 typedef struct Obj {
-    // The first word of the object represents the type of the object. Any code that handles object
-    // needs to check its type first, then access the following union members.
-    int type;
+    // The header of an object is 8 bytes long, so that a cons cell takes 24 bytes and an integer 16
+    // (instead of 32 and 24 with a header made of three ints plus padding).
 
-    // The total size of the object, including "type" field, this field, the contents, and the
-    // padding at the end of the object.
-    unsigned int size;
+    // The type of the object. Any code that handles object needs to check its type first, then
+    // access the following union members.
+    uint8_t type;
 
-    int line_num;  // The Lisp line where object was created
+    // The Lisp line where the object was created. 24 bits are enough for the line numbers of
+    // the sources a Lisp program is made of; bigger numbers are truncated.
+    unsigned int line_num : 24;
+
+    // The total size of the object, including the header, the contents, and the padding at the
+    // end of the object. It is always a multiple of the alignment (8 bytes).
+    uint32_t size;
 
     // Object values.
     union {
@@ -84,6 +91,9 @@ typedef struct Obj {
         void *moved;
     };
 } Obj;
+
+// The header must not grow: the memory consumption of every object depends on it.
+typedef char obj_header_must_be_8_bytes[offsetof(Obj, value) == 8 ? 1 : -1];
 
 typedef struct {
     char *filename;
