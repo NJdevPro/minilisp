@@ -194,5 +194,18 @@ run macroexpand '(if (= x 0) (print x))' "
   (macroexpand (if-zero x (print x)))"
 
 
+# Tail calls must not consume stack: 20000 nested calls would overflow it otherwise
+run tailcall 200010000 '(defun sum (n acc) (if (= n 0) acc (sum (- n 1) (+ n acc)))) (sum 20000 0)'
+run tailcall 200010000 '(defun sum (n acc) (progn 1 (if (= n 0) acc (progn 2 (sum (- n 1) (+ n acc)))))) (sum 20000 0)'
+run tailcall 200010000 '
+  (defmacro my-if (c a b) (list (quote if) c a b))
+  (defun sum (n acc) (my-if (= n 0) acc (sum (- n 1) (+ n acc))))
+  (sum 20000 0)'
+run tailcall t '
+  (defun even? (n) (if (= n 0) t (odd? (- n 1))))
+  (defun odd? (n) (if (= n 0) () (even? (- n 1))))
+  (even? 20000)'
+run tailcall 0 '(defun f (n) ((lambda (m) (if (= m 0) 0 (f (- m 1)))) n)) (f 20000)'
+
 # Sum from 0 to 10
 run recursion 55 '(defun f (x) (if (= x 0) 0 (+ (f (+ x -1)) x))) (f 10)'
