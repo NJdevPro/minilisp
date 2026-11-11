@@ -1,4 +1,4 @@
-(load "examples/library.lisp")
+(load "library.lisp")
 
 (defun hanoi-print (disk from to)
   (println (string-concat "Move disk " disk 

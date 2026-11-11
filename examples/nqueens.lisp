@@ -8,7 +8,7 @@
 ;;; This program solves N-queens puzzle by depth-first backtracking.
 ;;;
 
-(load "examples/library.lisp")
+(load "library.lisp")
 
 ;;;
 ;;; N-queens solver
