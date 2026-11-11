@@ -75,8 +75,9 @@ static Obj *cons(void *root, Obj **car, Obj **cdr) {
 }
 
 static Obj *make_symbol(void *root, const char *name) {
-    Obj *sym = alloc(root, TSYMBOL, strlen(name) + 1);
-    strcpy(sym->name, name);
+    Obj *sym = alloc(root, TSYMBOL, sizeof(Obj *) + strlen(name) + 1);
+    sym->bind = NULL;
+    strcpy(sym->sym_name, name);
     sym->line_num = filepos.line_num;
     return sym;
 }
@@ -241,7 +242,7 @@ static Obj *read_list(void *root) {
 // but return the existing one.
 static Obj *intern(void *root, const char *name) {
     for (Obj *p = Symbols; p != Nil; p = p->cdr)
-        if (strcmp(name, p->car->name) == 0)
+        if (strcmp(name, p->car->sym_name) == 0)
             return p->car;
     DEFINE1(root, sym);
     *sym = make_symbol(root, name);
@@ -360,7 +361,7 @@ static void print(Obj *obj) {
 
     case TINT   : printf("%lld", obj->value);
         break;
-    case TSYMBOL: fputs(obj->name, stdout);
+    case TSYMBOL: fputs(obj->sym_name, stdout);
         break;
     case TPRIMITIVE: fputs("<primitive>", stdout);
         break;
@@ -403,8 +404,24 @@ static int length(Obj *list) {
 
 static Obj *eval(void *root, Obj **env, Obj **obj);
 
+// The global environment is the frame at the top of the chain of frames, the only one which has no
+// parent. Its variables are not in the frame itself, they are stored in the symbols.
+static inline bool is_global(Obj *env) {
+    return env->up == Nil;
+}
+
 static void add_variable(void *root, Obj **env, Obj **sym, Obj **val) {
     DEFINE2(root, vars, tmp);
+    if (is_global(*env)) {
+        // Redefining a variable just changes its value: the symbol is the only way to reach it.
+        if ((*sym)->bind) {
+            (*sym)->bind->cdr = *val;
+        } else {
+            *tmp = cons(root, sym, val);
+            (*sym)->bind = *tmp;
+        }
+        return;
+    }
     *vars = (*env)->vars;
     *tmp = acons(root, sym, val, vars);
     (*env)->vars = *tmp;
@@ -459,40 +476,37 @@ static bool is_list(Obj *obj) {
     return obj == Nil || obj->type == TCELL;
 }
 
-static Obj *apply_func(void *root, Obj **env, Obj **fn, Obj **args) {
-    DEFINE3(root, params, newenv, body);
+// Returns the new environment frame in which the body of the function fn is evaluated: the
+// parameters are bound to the (already evaluated) arguments. The args slot is modified.
+static Obj *bind_args(void *root, Obj **fn, Obj **args) {
+    DEFINE2(root, params, newenv);
     *params = (*fn)->params;
     *newenv = (*fn)->env;
-    *newenv = push_env(root, newenv, params, args);
+    return push_env(root, newenv, params, args);
+}
+
+// Calls the function or macro fn with the (already evaluated, for a function) arguments, and
+// returns the value of its body. This is not a tail call: used for the macros expansion.
+static Obj *apply_func(void *root, Obj **env, Obj **fn, Obj **args) {
+    DEFINE2(root, newenv, body);
+    *newenv = bind_args(root, fn, args);
     *body = (*fn)->body;
     return progn(root, newenv, body);
 }
 
-// Apply fn with args.
-static Obj *apply(void *root, Obj **env, Obj **fn, Obj **args) {
-    if (!is_list(*args))
-        error("argument must be a list", (*args)->line_num);
-    if ((*fn)->type == TPRIMITIVE)
-        return (*fn)->fn(root, env, args);
-    if ((*fn)->type == TFUNCTION) {
-        DEFINE1(root, eargs);
-        *eargs = eval_list(root, env, args);
-        return apply_func(root, env, fn, eargs);
-    }
-    error("not supported", (*args)->line_num);
-    return Nil; //fix warning
-}
-
 // Searches for a variable by symbol. Returns null if not found.
 static Obj *find(Obj **env, Obj *sym) {
-    for (Obj *p = *env; p != Nil; p = p->up) { // search all environments
+    // Search the local environments first...
+    Obj *p = *env;
+    for (; !is_global(p); p = p->up) {
         for (Obj *cell = p->vars; cell != Nil; cell = cell->cdr) {
             Obj *bind = cell->car;
             if (sym == bind->car)
                 return bind;
         }
     }
-    return NULL;
+    // ...then the global one, which is stored in the symbol.
+    return sym->bind;
 }
 
 // Expands the given macro application form.
@@ -508,10 +522,13 @@ static Obj *macroexpand(void *root, Obj **env, Obj **obj) {
     return apply_func(root, env, macro, args);
 }
 
-// Evaluates the S expression.
-static Obj *eval(void *root, Obj **env, Obj **obj) {
-    check_stack((*obj)->line_num);
-    switch ((*obj)->type) {
+// The special forms which are evaluated by eval itself, in order to handle the tail calls.
+static Obj *prim_if(void *root, Obj **env, Obj **list);
+static Obj *prim_progn(void *root, Obj **env, Obj **list);
+
+// Evaluates the objects which are not function application forms. Returns NULL for a form.
+static inline Obj *eval_simple(Obj **env, Obj *obj) {
+    switch (obj->type) {
     case TINT:
     case TPRIMITIVE:
     case TFUNCTION:
@@ -519,43 +536,109 @@ static Obj *eval(void *root, Obj **env, Obj **obj) {
     case TSTRING:
     case TNIL:
         // Self-evaluating objects
-        return *obj;
+        return obj;
     case TSYMBOL: {
         // Variable
-        Obj *bind = find(env, *obj);
-        if (!bind) {
-            error("Undefined symbol: %s", (*obj)->line_num, (*obj)->name);
-        }
+        Obj *bind = find(env, obj);
+        if (!bind)
+            error("Undefined symbol: %s", obj->line_num, obj->sym_name);
         return bind->cdr;
     }
-    case TCELL: {
+    case TCELL:
+        return NULL;
+    default:
+        error("Bug: eval: Unknown tag type: %d", obj->line_num, obj->type);
+    }
+}
+
+// Evaluates a function application form, or anything else that comes in tail position.
+//
+// The tail calls do not consume stack: the expression in tail position of an "if", of a "progn",
+// of the body of a function or of the expansion of a macro is not evaluated by a recursive call.
+// Instead, it becomes the current expression and the loop goes on. For that, the current
+// expression and environment live in slots owned by this function. The slots of the caller must
+// not be modified, because the caller keeps using them.
+static Obj *eval_form(void *root, Obj **env, Obj **obj) {
+    DEFINE5(root, cur, cenv, fn, args, tmp);
+    *cur = *obj;
+    *cenv = *env;
+    for (;;) {
+        Obj *r = eval_simple(cenv, *cur);
+        if (r)
+            return r;
+
         // Function application form
-        DEFINE3(root, fn, expanded, args);
-        *args = (*obj)->cdr;
-        if ((*obj)->car->type == TSYMBOL) {
+        *args = (*cur)->cdr;
+        if ((*cur)->car->type == TSYMBOL) {
             // Look the head symbol up only once: it is either a macro to expand or the function
             // to call.
-            Obj *bind = find(env, (*obj)->car);
+            Obj *bind = find(cenv, (*cur)->car);
             if (!bind)
-                error("Undefined symbol: %s", (*obj)->car->line_num, (*obj)->car->name);
+                error("Undefined symbol: %s", (*cur)->car->line_num, (*cur)->car->sym_name);
             *fn = bind->cdr;
-            if ((*fn)->type == TMACRO) {
-                *expanded = apply_func(root, env, fn, args);
-                return eval(root, env, expanded);
-            }
         } else {
-            *fn = (*obj)->car;
-            *fn = eval(root, env, fn);
+            *fn = (*cur)->car;
+            *fn = eval(root, cenv, fn);
+        }
+
+        if ((*fn)->type == TMACRO) {
+            // Expand, then evaluate the expansion in place of the form
+            *cur = apply_func(root, cenv, fn, args);
+            continue;
         }
         if ((*fn)->type != TPRIMITIVE && (*fn)->type != TFUNCTION)
             error("The head of a list must be a function",
-                  (*fn)->line_num ? (*fn)->line_num : (*obj)->line_num);
-        return apply(root, env, fn, args);
+                  (*fn)->line_num ? (*fn)->line_num : (*cur)->line_num);
+        if (!is_list(*args))
+            error("argument must be a list", (*args)->line_num);
+
+        if ((*fn)->type == TFUNCTION) {
+            // Evaluate the arguments, then the body in a new environment
+            *tmp = eval_list(root, cenv, args);
+            *cenv = bind_args(root, fn, tmp);
+            *args = (*fn)->body;
+            goto sequence;
+        }
+
+        if ((*fn)->fn == prim_if) {
+            // (if cond then else ...)
+            if (length(*args) < 2)
+                error("Malformed if", (*cur)->line_num);
+            *tmp = (*args)->car;
+            *tmp = eval(root, cenv, tmp);
+            if (*tmp != Nil) {
+                *cur = (*args)->cdr->car;
+                continue;
+            }
+            *args = (*args)->cdr->cdr;
+            goto sequence;
+        }
+        if ((*fn)->fn == prim_progn)
+            goto sequence;
+
+        // The other primitives are not evaluating anything in tail position
+        return (*fn)->fn(root, cenv, args);
+
+    sequence:
+        // Evaluates the expressions of the list *args. The last one is in tail position.
+        if (*args == Nil)
+            return Nil;
+        while ((*args)->type == TCELL && (*args)->cdr != Nil) {
+            *tmp = (*args)->car;
+            eval(root, cenv, tmp);
+            *args = (*args)->cdr;
+        }
+        if ((*args)->type != TCELL)
+            error("Improper list of expressions", (*args)->line_num);
+        *cur = (*args)->car;
     }
-    default:
-        error("Bug: eval: Unknown tag type: %d", (*obj)->line_num, (*obj)->type);
-    }
-    return Nil; // fix warning
+}
+
+// Evaluates the S expression.
+static Obj *eval(void *root, Obj **env, Obj **obj) {
+    check_stack((*obj)->line_num);
+    Obj *r = eval_simple(env, *obj);
+    return r ? r : eval_form(root, env, obj);
 }
 
 //======================================================================
@@ -615,7 +698,7 @@ static Obj *prim_setq(void *root, Obj **env, Obj **list) {
     DEFINE2(root, bind, value);
     *bind = find(env, (*list)->car);
     if (!*bind)
-        error("Unbound variable %s", (*list)->line_num, (*list)->car->name);
+        error("Unbound variable %s", (*list)->line_num, (*list)->car->sym_name);
     *value = (*list)->cdr->car;
     *value = eval(root, env, value);
     (*bind)->cdr = *value;
@@ -1000,7 +1083,7 @@ static Obj *prim_symbol_to_string(void *root, Obj **env, Obj **list) {
 
     // The name is copied out of the GC heap before allocating
     char name[SYMBOL_MAX_LEN + 1];
-    strncpy(name, args->car->name, sizeof(name) - 1);
+    strncpy(name, args->car->sym_name, sizeof(name) - 1);
     name[sizeof(name) - 1] = '\0';
     return make_string(root, name);
 }

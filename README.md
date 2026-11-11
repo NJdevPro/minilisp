@@ -107,9 +107,9 @@ This file is loaded at startup, so one can recall previous commands
 
 Known bugs:
 * recall of multiline commands does not work as expected.
-* this doesn't have tail call optimization, and each call uses a good deal of
-  the C stack. A recursion deeper than a few thousand calls stops with the error
-  "Stack overflow: the recursion is too deep".
+* a recursion which is not a tail call (such as `(+ 1 (f (- n 1)))`) uses the C stack:
+  deeper than about 25000 calls it stops with the error "Stack overflow: the
+  recursion is too deep".
 
 Original README (completed)
 ===============
@@ -283,9 +283,21 @@ is returned (`()` if there is none).
 `()`. This is the only loop supported by MiniLisp.
 
 If you are familiar with Scheme, you might be wondering if you could write a
-loop by tail recursion in MiniLisp. The answer is no. Tail calls consume stack
-space in MiniLisp, so a loop written as recursion will fail with the "Stack
-overflow" error after a few thousand iterations.
+loop by tail recursion in MiniLisp. The answer is yes: a call in tail position
+does not consume any stack space. This is the case of the last expression of the
+body of a function, of `progn`, of the branches of `if`, and of whatever a macro
+expands to such an expression. So a loop can be written as a recursion with
+an accumulator, and run for as long as needed:
+
+    (defun sum (n acc)
+      (if (= n 0)
+          acc
+          (sum (- n 1) (+ n acc))))   ; tail call
+    (sum 1000000 0)                   ; -> 500000500000
+
+A recursion which is not a tail call, such as `(+ 1 (f (- n 1)))`, still needs
+a stack frame for each level and fails with the "Stack overflow" error after
+about 25000 calls.
 
 ### Imperative programming
 

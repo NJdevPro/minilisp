@@ -72,6 +72,15 @@ static inline void** add_root_frame(void **prev_frame, int size, void *frame[]) 
     Obj **var3 = (Obj **)(root_frame + 3);      \
     Obj **var4 = (Obj **)(root_frame + 4);
 
+#define DEFINE5(prev_frame, var1, var2, var3, var4, var5)   \
+    void *root_frame[7];                        \
+    prev_frame = add_root_frame(prev_frame, 5, root_frame); \
+    Obj **var1 = (Obj **)(root_frame + 1);      \
+    Obj **var2 = (Obj **)(root_frame + 2);      \
+    Obj **var3 = (Obj **)(root_frame + 3);      \
+    Obj **var4 = (Obj **)(root_frame + 4);      \
+    Obj **var5 = (Obj **)(root_frame + 5);
+
 
 void gc_init(void);
 Obj *alloc(void *root, int type, size_t size);
