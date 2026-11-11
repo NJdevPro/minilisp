@@ -84,9 +84,18 @@ typedef struct {
     int line_num;
 } filepos_t;
 
-void error(char *fmt, int line_num, ...);
+// Reports an error and jumps back to the end of the current top-level evaluation.
+void error(const char *fmt, int line_num, ...) __attribute__((noreturn, format(printf, 1, 3)));
 
 void init_minilisp(Obj **env);
-int eval_input(void *input, Obj **env, Obj **expr);
+
+// Sets the text the reader will consume. The text must stay valid until it is fully evaluated.
+void set_input(const char *text, size_t len);
+
+// Evaluates all the expressions of the current input. Errors are reported on stderr.
+int eval_input(void *root, Obj **env, Obj **expr);
+
+// Loads and evaluates a file.
+void process_file(void *root, char *fname, Obj **env, Obj **expr);
 
 #endif // _MINILISP_H_
