@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #endif
+#include <errno.h>
 #include <unistd.h>
 #include "../bestline/bestline.h"
 #include "ketopt.h"
@@ -52,21 +53,15 @@ char *hints(const char *buf, const char **ansi1, const char **ansi2) {
 // This struct keeps track of the current file/line being evaluated
 filepos_t filepos = {"", 0, 1};
 
+static bool no_history = false;
+
 void minilisp(char *text, size_t length, bool with_repl, Obj **env, Obj **expr) {
 
-    // Process file
+    // Process the code given on the command line
     if(text != NULL){
-        // Save old stdin
-        FILE * old_stdin = stdin;
-        // Open a memory stream
-        FILE * stream = fmemopen(text, length, "r");
-        // Redirect stdin to the in memory stream in order to use getchar()
-        stdin = stream;
-        eval_input(text, env, expr);
+        set_input(text, length);
+        eval_input(gc_root, env, expr);
         free(text);
-        // restore stdin
-        stdin = old_stdin;
-        fclose(stream);
     }
 
     // REPL
@@ -75,23 +70,24 @@ void minilisp(char *text, size_t length, bool with_repl, Obj **env, Obj **expr) 
             char prompt[15] = "";
             filepos = (filepos_t){ .filename = "", .file_len = 0, .line_num = 1 };
             sprintf(prompt, "%d:", promptnum);
+            errno = 0;
             char *line = bestline(prompt);
-            if(line == NULL) continue;
-            // Save old stdin
-            FILE * old_stdin = stdin;
-            // Open a memory stream
-            FILE * stream = fmemopen(line, strlen(line), "r");
-            // Redirect stdin to the in memory stream in order to use getchar()
-            stdin = stream;
-            
+            if (line == NULL) {
+                if (errno == EAGAIN)  // Ctrl-C
+                    continue;
+                break;                // end of input (Ctrl-D)
+            }
+
             if (line[0] != '\0' && line[0] != '/') {
-                eval_input(line, env, expr);
-                bestlineHistoryAdd(line);
-                bestlineHistorySave("history.txt");
+                set_input(line, strlen(line));
+                eval_input(gc_root, env, expr);
+                if (!no_history) {
+                    bestlineHistoryAdd(line);
+                    bestlineHistorySave("history.txt");
+                }
             } else if (line[0] == '/') {
                 if (!strncmp(line, "/memory", 7)){
-                    extern size_t mem_nused;
-                    printf("Memory used: %ld / Total: %d\n", mem_nused, MEMORY_SIZE);
+                    printf("Memory used: %zu / Total: %zu\n", mem_nused, heap_size);
                 }
                 else if (!strncmp(line, "/help", 5)){
                     puts("Type Ctrl-C to quit.");
@@ -104,14 +100,10 @@ void minilisp(char *text, size_t length, bool with_repl, Obj **env, Obj **expr) 
             }
 
             free(line);
-            // restore stdin
-            stdin = old_stdin;
-            fclose(stream);
         }
 }
 
 
-static bool no_history = false;
 static char *one_liner = NULL;
 static int num_files = 0;
 static char **filenames;
@@ -145,7 +137,8 @@ void parse_args(int argc, char **argv) {
         (allows distinguishing between missing required argument and unknown option)
     */
     while (true) {
-        int c = ketopt(&option, argc, argv, 0, "-:x:Hrh", long_options);
+        // permute: the options may be given after the file names
+        int c = ketopt(&option, argc, argv, 1, "-:x:Hrh", long_options);
         if (c == -1)
             break;
         int idx = option.longidx;
@@ -202,8 +195,8 @@ void parse_args(int argc, char **argv) {
     // regular arguments: run files
     num_files = argc - option.ind;
     filenames = (char **) malloc(num_files * sizeof(char *));
-    for (int i = 1; i <= num_files; i++) {
-        filenames[i-1] = strdup(argv[i]);
+    for (int i = 0; i < num_files; i++) {
+        filenames[i] = strdup(argv[option.ind + i]);
     }
 }
 
@@ -216,8 +209,7 @@ int main(int argc, char **argv) {
 
     for (int i = 0; i < num_files; i++) {
         printf("Loading %s\n", filenames[i]);
-        void process_file(char *fname, Obj **env, Obj **expr);
-        process_file(filenames[i], env, expr);
+        process_file(gc_root, filenames[i], env, expr);
         free(filenames[i]);
     }
     free(filenames);

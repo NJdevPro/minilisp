@@ -7,8 +7,11 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <limits.h>
 #include <setjmp.h>
 #include <string.h>
+#include <sys/resource.h>
+#include <unistd.h>
 #include "minilisp.h"
 #include "gc.h"
 
@@ -16,7 +19,7 @@ jmp_buf context;
 
 extern filepos_t filepos;
 
-void error(char *fmt, int line_num, ...) {
+void error(const char *fmt, int line_num, ...) {
     va_list ap;
     va_start(ap, line_num);
     fprintf(stderr, "%s[%d]: ", filepos.filename, line_num);
@@ -43,9 +46,20 @@ extern Obj *Symbols;
 
 void *gc_root = NULL;    // root of memory
 
-extern Obj *alloc(void *root, int type, size_t size);
+// Small integers are preallocated: they are never managed by GC (like the constants above) and
+// computing with them does not allocate.
+#define SMALL_INT_MIN (-128)
+#define SMALL_INT_MAX 1023
+static Obj small_ints[SMALL_INT_MAX - SMALL_INT_MIN + 1];
+
+static void init_small_ints(void) {
+    for (int i = 0; i < SMALL_INT_MAX - SMALL_INT_MIN + 1; i++)
+        small_ints[i] = (Obj){ .type = TINT, .size = sizeof(Obj), .value = i + SMALL_INT_MIN };
+}
 
 static Obj *make_int(void *root, long long value) {
+    if (SMALL_INT_MIN <= value && value <= SMALL_INT_MAX)
+        return &small_ints[value - SMALL_INT_MIN];
     Obj *r = alloc(root, TINT, sizeof(long long));
     r->value = value;
     r->line_num = filepos.line_num;
@@ -60,7 +74,7 @@ static Obj *cons(void *root, Obj **car, Obj **cdr) {
     return cell;
 }
 
-static Obj *make_symbol(void *root, char *name) {
+static Obj *make_symbol(void *root, const char *name) {
     Obj *sym = alloc(root, TSYMBOL, strlen(name) + 1);
     strcpy(sym->name, name);
     sym->line_num = filepos.line_num;
@@ -113,36 +127,67 @@ static Obj *acons(void *root, Obj **x, Obj **y, Obj **a) {
 //======================================================================
 
 #define SYMBOL_MAX_LEN 200
-const char symbol_chars[] = "~!@#$%^&*-_=+:/?<>";
-
-void swap(char *left, char *right) {
-    char tmp = *left;
-    *left = *right;
-    *right = tmp;
-}
+static const char symbol_chars[] = "~!@#$%^&*-_=+:/?<>";
 
 static Obj *read_expr(void *root);
 
-static int peek(void) {
-    int c = getchar();
-    ungetc(c, stdin);
-    return c;
+// The text being read. Reading directly from a buffer is much faster than going through stdio,
+// and it does not require to hijack stdin.
+typedef struct {
+    const char *text;
+    size_t len;
+    size_t pos;
+} reader_t;
+
+static reader_t reader;
+
+void set_input(const char *text, size_t len) {
+    reader = (reader_t){ text, len, 0 };
+}
+
+static inline int peek(void) {
+    return reader.pos < reader.len ? (unsigned char)reader.text[reader.pos] : EOF;
 }
 
 static int read_char(void) {
-    int c = getchar();
+    int c = peek();
+    if (c == EOF)
+        return EOF;
+    reader.pos++;
     if (c == '\n') {
         filepos.line_num++;
-        if (peek() == '\r') {
-            getchar();
-        }
+        if (peek() == '\r')
+            reader.pos++;
     } else if (c == '\r') {
         filepos.line_num++;
-        if (peek() == '\n') {
-            getchar();
-        }
+        if (peek() == '\n')
+            reader.pos++;
     }
     return c;
+}
+
+static bool is_symbol_char(int c) {
+    return c > 0 && strchr(symbol_chars, c) != NULL;
+}
+
+// The C stack is the limit of the recursion depth. Fail with a Lisp error before reaching it,
+// instead of crashing with SEGV.
+static uintptr_t stack_limit = 0;
+
+static void init_stack_limit(void) {
+    char here;
+    struct rlimit rl;
+    size_t size = 8 << 20;
+    if (getrlimit(RLIMIT_STACK, &rl) == 0 && rl.rlim_cur != RLIM_INFINITY)
+        size = rl.rlim_cur;
+    // Keep a safety margin for the C library and the error handling.
+    stack_limit = (uintptr_t)&here - (size - (size >> 3) - (64 << 10));
+}
+
+static inline void check_stack(int line_num) {
+    char here;
+    if ((uintptr_t)&here < stack_limit)
+        error("Stack overflow: the recursion is too deep", line_num);
 }
 
 // Destructively reverses the given list.
@@ -159,22 +204,15 @@ static Obj *reverse(Obj *p) {
 
 // Skips the input until newline is found. Newline is one of \r, \r\n or \n.
 static void skip_line(void) {
-    for (;;) {
-        char c = getchar();
-        if (c == EOF || c == '\n'){
-            filepos.line_num++;
-            return;
-        }
-        if (c == '\r') {
-            if (peek() == '\n')
-                getchar();
-            return;
-        }
-    }
+    int c;
+    // read_char() counts the lines and swallows the second character of \r\n and \n\r.
+    while ((c = read_char()) != EOF && c != '\n' && c != '\r')
+        ;
 }
 
 // Reads a list. Note that '(' has already been read.
 static Obj *read_list(void *root) {
+    check_stack(filepos.line_num);
     DEFINE3(root, obj, head, last);
     *head = Nil;
     for (;;) {
@@ -184,7 +222,11 @@ static Obj *read_list(void *root) {
         if (*obj == Cparen)
             return reverse(*head);
         if (*obj == Dot) {
+            if (*head == Nil)
+                error("Unexpected dot at the beginning of a list", filepos.line_num);
             *last = read_expr(root);
+            if (!*last || *last == Cparen || *last == Dot)
+                error("Expression expected after dot", filepos.line_num);
             if (read_expr(root) != Cparen)
                 error("Closed parenthesis expected after dot", filepos.line_num);
             Obj *ret = reverse(*head);
@@ -197,7 +239,7 @@ static Obj *read_list(void *root) {
 
 // May create a new symbol. If there's a symbol with the same name, it will not create a new symbol
 // but return the existing one.
-static Obj *intern(void *root, char *name) {
+static Obj *intern(void *root, const char *name) {
     for (Obj *p = Symbols; p != Nil; p = p->cdr)
         if (strcmp(name, p->car->name) == 0)
             return p->car;
@@ -217,9 +259,13 @@ static Obj *read_quote(void *root) {
     return *tmp;
 }
 
-static long long read_number(int val) {
-    while (isdigit(peek()))
-        val = val * 10 + (read_char() - '0');
+static long long read_number(long long val) {
+    while (isdigit(peek())) {
+        int digit = read_char() - '0';
+        if (val > (LLONG_MAX - digit) / 10)
+            error("Integer too large", filepos.line_num);
+        val = val * 10 + digit;
+    }
     return val;
 }
 
@@ -227,7 +273,7 @@ static Obj *read_symbol(void *root, char c) {
     char buf[SYMBOL_MAX_LEN + 1];
     buf[0] = c;
     int len = 1;
-    while (isalnum(peek()) || strchr(symbol_chars, peek())) {
+    while (isalnum(peek()) || is_symbol_char(peek())) {
         if (SYMBOL_MAX_LEN <= len)
             error("Symbol name too long", filepos.line_num);
         buf[len++] = read_char();
@@ -262,7 +308,7 @@ static Obj *read_string(void *root) {
 
 static Obj *read_expr(void *root) {
     for (;;) {
-        char c = read_char();
+        int c = read_char();
         if (c == ' ' || c == '\n' || c == '\r' || c == '\t')
             continue;
         if (c == ';') {
@@ -283,7 +329,7 @@ static Obj *read_expr(void *root) {
             return make_int(root, read_number(c - '0'));
         if (c == '-' && isdigit(peek()))
             return make_int(root, -read_number(0));
-        if (isalpha(c) || strchr(symbol_chars, c))
+        if (isalpha(c) || is_symbol_char(c))
             return read_symbol(root, c);
         if (c == EOF)
             return NULL;
@@ -378,12 +424,15 @@ static Obj *push_env(void *root, Obj **env, Obj **vars, Obj **vals) {
     }
     if (*vars != Nil)
         *map = acons(root, vars, vals, map);
+    else if (*vals != Nil)
+        error("Cannot apply function: number of argument does not match", filepos.line_num);
     return make_env(root, map, env);
 }
 
 // Evaluates the list elements from head and returns the last return value.
 static Obj *progn(void *root, Obj **env, Obj **list) {
     DEFINE2(root, lp, r);
+    *r = Nil;
     for (*lp = *list; *lp != Nil; *lp = (*lp)->cdr) {
         *r = (*lp)->car;
         *r = eval(root, env, r);
@@ -395,11 +444,14 @@ static Obj *progn(void *root, Obj **env, Obj **list) {
 static Obj *eval_list(void *root, Obj **env, Obj **list) {
     DEFINE4(root, head, lp, expr, result);
     *head = Nil;
-    for (lp = list; *lp != Nil; *lp = (*lp)->cdr) {
+    // Walk with our own slot: the caller's list must be left untouched.
+    for (*lp = *list; (*lp)->type == TCELL; *lp = (*lp)->cdr) {
         *expr = (*lp)->car;
         *result = eval(root, env, expr);
         *head = cons(root, result, head);
     }
+    if (*lp != Nil)
+        error("Improper list of arguments", (*lp)->line_num);
     return reverse(*head);
 }
 
@@ -458,6 +510,7 @@ static Obj *macroexpand(void *root, Obj **env, Obj **obj) {
 
 // Evaluates the S expression.
 static Obj *eval(void *root, Obj **env, Obj **obj) {
+    check_stack((*obj)->line_num);
     switch ((*obj)->type) {
     case TINT:
     case TPRIMITIVE:
@@ -478,14 +531,25 @@ static Obj *eval(void *root, Obj **env, Obj **obj) {
     case TCELL: {
         // Function application form
         DEFINE3(root, fn, expanded, args);
-        *expanded = macroexpand(root, env, obj);
-        if (*expanded != *obj)
-            return eval(root, env, expanded);
-        *fn = (*obj)->car;
-        *fn = eval(root, env, fn);
         *args = (*obj)->cdr;
+        if ((*obj)->car->type == TSYMBOL) {
+            // Look the head symbol up only once: it is either a macro to expand or the function
+            // to call.
+            Obj *bind = find(env, (*obj)->car);
+            if (!bind)
+                error("Undefined symbol: %s", (*obj)->car->line_num, (*obj)->car->name);
+            *fn = bind->cdr;
+            if ((*fn)->type == TMACRO) {
+                *expanded = apply_func(root, env, fn, args);
+                return eval(root, env, expanded);
+            }
+        } else {
+            *fn = (*obj)->car;
+            *fn = eval(root, env, fn);
+        }
         if ((*fn)->type != TPRIMITIVE && (*fn)->type != TFUNCTION)
-            error("The head of a list must be a function", (*obj)->line_num);
+            error("The head of a list must be a function",
+                  (*fn)->line_num ? (*fn)->line_num : (*obj)->line_num);
         return apply(root, env, fn, args);
     }
     default:
@@ -514,8 +578,9 @@ static Obj *prim_quote(void *root, Obj **env, Obj **list) {
 
 static Obj *prim_atom(void *root, Obj **env, Obj **list) {
     if (length(*list) != 1)
-        error("atom takes ontly 1 argument", (*list)->line_num);
-    return ((*list)->car->type != TCELL) ? True : Nil;
+        error("atom takes only 1 argument", (*list)->line_num);
+    Obj *values = eval_list(root, env, list);
+    return (values->car->type != TCELL) ? True : Nil;
 }
 
 // (cons expr expr)
@@ -530,7 +595,7 @@ static Obj *prim_cons(void *root, Obj **env, Obj **list) {
 // (car <cell>)
 static Obj *prim_car(void *root, Obj **env, Obj **list) {
     Obj *args = eval_list(root, env, list);
-    if (args->car->type != TCELL || args->cdr != Nil)
+    if (args == Nil || args->car->type != TCELL || args->cdr != Nil)
         error("Malformed car", (*list)->line_num);
     return args->car->car;
 }
@@ -538,7 +603,7 @@ static Obj *prim_car(void *root, Obj **env, Obj **list) {
 // (cdr <cell>)
 static Obj *prim_cdr(void *root, Obj **env, Obj **list) {
     Obj *args = eval_list(root, env, list);
-    if (args->car->type != TCELL || args->cdr != Nil)
+    if (args == Nil || args->car->type != TCELL || args->cdr != Nil)
         error("Malformed cdr", (*list)->line_num);
     return args->car->cdr;
 }
@@ -575,16 +640,16 @@ static Obj *prim_while(void *root, Obj **env, Obj **list) {
     *cond = (*list)->car;
     while (eval(root, env, cond) != Nil) {
         *exprs = (*list)->cdr;
-        eval_list(root, env, exprs);
+        progn(root, env, exprs);
     }
     return Nil;
 }
 
 // (gensym)
 static Obj *prim_gensym(void *root, Obj **env, Obj **list) {
-  static int count = 0;
-  char buf[10];
-  snprintf(buf, sizeof(buf), "G__%d", count++);
+  static unsigned long count = 0;
+  char buf[32];
+  snprintf(buf, sizeof(buf), "G__%lu", count++);
   return make_symbol(root, buf);
 }
 
@@ -612,67 +677,83 @@ static Obj *prim_length(void *root, Obj **env, Obj **list) {
     return make_int(root, len);
 }
 
-// (reverse ... | reverse <cell>)
+// Returns a new list containing the elements of *list in the reverse order. *list is left untouched.
+static Obj *reverse_copy(void *root, Obj **list) {
+    DEFINE3(root, p, head, elem);
+    *head = Nil;
+    for (*p = *list; (*p)->type == TCELL; *p = (*p)->cdr) {
+        *elem = (*p)->car;
+        *head = cons(root, elem, head);
+    }
+    return *head;
+}
+
+// (reverse ... | reverse <cell> | reverse <string>)
+// The arguments are never modified: a new list or string is returned.
 static Obj *prim_reverse(void *root, Obj **env, Obj **list) {
-    Obj *args = eval_list(root, env, list);
-    int len = length(args);
-    if (len != 1) {
-        return reverse(args);
+    DEFINE1(root, args);
+    *args = eval_list(root, env, list);
+    if (length(*args) != 1)
+        return reverse(*args);  // The list of evaluated arguments is ours: reverse it in place
+    *args = (*args)->car;
+    if (*args == Nil)
+        return Nil;
+    if ((*args)->type == TCELL)
+        return reverse_copy(root, args);
+    if ((*args)->type == TSTRING) {
+        size_t len = strlen((*args)->name);
+        Obj *r = alloc(root, TSTRING, len + 1);
+        r->line_num = filepos.line_num;
+        const char *src = (*args)->name;  // Read after alloc, which may have moved the string
+        for (size_t i = 0; i < len; i++)
+            r->name[i] = src[len - 1 - i];
+        r->name[len] = '\0';
+        return r;
     }
-    else { 
-        Obj *car = args->car;
-        if (car != Nil) { 
-            if (car->type == TCELL) {
-                return reverse(car);
-            }
-            else if(car->type == TSTRING){
-                char *left = car->name, 
-                     *right = left + strlen(car->name) - 1;
-                while (left <= right) {
-                    swap(left, right);
-                    left++, right--;
-                }
-            }
-            else {
-                error("When reverse has a single argument, it must be a list", 
-                (*list)->line_num);
-            }
-        }
-        return car;
-    }
+    error("When reverse has a single argument, it must be a list or a string",
+          (*list)->line_num);
 }
 
-#define PRIM_ARITHMETIC_OP(PRIM_OP, OP, OPEQ)                       \
-static Obj *PRIM_OP(void *root, Obj **env, Obj **list) {            \
-    Obj *args = eval_list(root, env, list);                         \
-    long long r = args->car->value;                                 \
-    for (Obj *p = args->cdr; p != Nil; p = p->cdr) {                \
-        if (p->car->type != TINT)                                   \
-            error(#OP " takes only numbers", (*list)->line_num);    \
-        r OPEQ p->car->value;                                       \
-    }                                                               \
-    return make_int(root, r);                                       \
-}
-
-// (+ <integer> ...)
-PRIM_ARITHMETIC_OP(prim_plus, +, += )
-PRIM_ARITHMETIC_OP(prim_mult, *, *= )
-PRIM_ARITHMETIC_OP(prim_div , /, /= )
-PRIM_ARITHMETIC_OP(prim_modulo, %, %= )
-
-// (- <integer> ...)
-static Obj *prim_minus(void *root, Obj **env, Obj **list) {
+// (op <integer> ...) with op one of + - * / %
+// Arithmetic wraps around on overflow, like the unsigned arithmetic does.
+static Obj *arith(void *root, Obj **env, Obj **list, char op) {
     Obj *args = eval_list(root, env, list);
     for (Obj *p = args; p != Nil; p = p->cdr)
         if (p->car->type != TINT)
-            error("- takes only numbers", (*list)->line_num);
-    if (args->cdr == Nil)
-        return make_int(root, -args->car->value);
-    long long r = args->car->value;
-    for (Obj *p = args->cdr; p != Nil; p = p->cdr)
-        r -= p->car->value;
-    return make_int(root, r);
+            error("%c takes only numbers", (*list)->line_num, op);
+    if (args == Nil) {
+        if (op == '+') return make_int(root, 0);
+        if (op == '*') return make_int(root, 1);
+        error("%c takes at least 1 number", (*list)->line_num, op);
+    }
+    unsigned long long r = args->car->value;
+    if (op == '-' && args->cdr == Nil)
+        return make_int(root, (long long)(0 - r));
+    for (Obj *p = args->cdr; p != Nil; p = p->cdr) {
+        long long v = p->car->value;
+        switch (op) {
+        case '+': r += v; break;
+        case '-': r -= v; break;
+        case '*': r *= v; break;
+        default:  // '/' and '%'
+            if (v == 0)
+                error("Division by zero", (*list)->line_num);
+            if (v == -1)  // Avoids the overflow of LLONG_MIN / -1
+                r = op == '/' ? 0 - r : 0;
+            else
+                r = op == '/' ? (long long)r / v : (long long)r % v;
+        }
+    }
+    return make_int(root, (long long)r);
 }
+
+// (+ <integer> ...)
+static Obj *prim_plus(void *root, Obj **env, Obj **list)   { return arith(root, env, list, '+'); }
+// (- <integer> ...)
+static Obj *prim_minus(void *root, Obj **env, Obj **list)  { return arith(root, env, list, '-'); }
+static Obj *prim_mult(void *root, Obj **env, Obj **list)   { return arith(root, env, list, '*'); }
+static Obj *prim_div(void *root, Obj **env, Obj **list)    { return arith(root, env, list, '/'); }
+static Obj *prim_modulo(void *root, Obj **env, Obj **list) { return arith(root, env, list, '%'); }
 
 // (op <integer> <integer>)
 #define PRIM_COMPARISON_OP(PRIM_OP, OP)                             \
@@ -701,28 +782,49 @@ static Obj *prim_not(void *root, Obj **env, Obj **list) {
     return values->car == Nil ? True : Nil;
 }
 
-extern void process_file(char *fname, Obj **env, Obj **expr);
+// Returns a newly allocated path for a file to load. A relative path is first looked up in the
+// directory of the file being loaded, then in the current directory.
+__attribute__((noinline)) static char *resolve_path(const char *name) {
+    const char *current = filepos.filename;
+    const char *slash = current ? strrchr(current, '/') : NULL;
+    if (name[0] != '/' && slash) {
+        size_t dirlen = slash - current + 1;
+        char *path = malloc(dirlen + strlen(name) + 1);
+        if (path) {
+            memcpy(path, current, dirlen);
+            strcpy(path + dirlen, name);
+            if (access(path, R_OK) == 0)
+                return path;
+            free(path);
+        }
+    }
+    return strdup(name);
+}
 
 static Obj *prim_load(void *root, Obj **env, Obj **list) {
     DEFINE1(root, expr);
     Obj *args = eval_list(root, env, list);
-    if (args->car->type != TSTRING){
+    if (length(args) != 1 || args->car->type != TSTRING)
         error("load: filename must be a string", (*list)->line_num);
-    }
-    char *name = args->car->name;
-    
-    // Save old context and set up new one for error handling
+    // The name must be copied: the string lives in the GC heap and would move.
+    char *name = resolve_path(args->car->name);
+    if (!name)
+        error("Out of memory in load", (*list)->line_num);
+
+    // Save the old context and set up a new one for error handling
     jmp_buf old_context;
     memcpy(&old_context, &context, sizeof(jmp_buf));
-    
-    if (setjmp(context) == 0) {
-        filepos_t calling_file = filepos;
-        process_file(name, env, expr);
-        filepos = calling_file;
-    }
-    
-    // Restore old context
+    filepos_t calling_file = filepos;
+    reader_t calling_reader = reader;
+
+    if (setjmp(context) == 0)
+        process_file(root, name, env, expr);
+
+    // Restore the old context, the position in the calling file and the calling text
     memcpy(&context, &old_context, sizeof(jmp_buf));
+    filepos = calling_file;
+    reader = calling_reader;
+    free(name);
     return Nil;
 }
 
@@ -789,16 +891,20 @@ static Obj *prim_macroexpand(void *root, Obj **env, Obj **list) {
     return macroexpand(root, env, body);
 }
 
-// (print ...)
+// (print expr ...)
+// Evaluates and prints each argument, separated by a space.
 static Obj *prim_print(void *root, Obj **env, Obj **list) {
-    DEFINE1(root, tmp);
-    *tmp = (*list)->car;
-    print(eval(root, env, tmp));
+    DEFINE2(root, lp, tmp);
+    for (*lp = *list; (*lp)->type == TCELL; *lp = (*lp)->cdr) {
+        if (*lp != *list)
+            fputc(' ', stdout);
+        *tmp = (*lp)->car;
+        print(eval(root, env, tmp));
+    }
     return Nil;
 }
 
-
-// (println ...)
+// (println expr ...)
 static Obj *prim_println(void *root, Obj **env, Obj **list) {
     prim_print(root, env, list);
     fputc('\n', stdout);
@@ -831,6 +937,8 @@ static Obj *prim_eq(void *root, Obj **env, Obj **list) {
     Obj *values = eval_list(root, env, list);
     Obj *first = values->car;
     Obj *second = values->cdr->car;
+    if (first->type == TINT && second->type == TINT)
+        return first->value == second->value ? True : Nil;
     if (first->type == TSTRING){
         if (second->type == TSTRING)
             return strcmp(first->name, second->name) == 0 ? True : Nil;
@@ -841,46 +949,44 @@ static Obj *prim_eq(void *root, Obj **env, Obj **list) {
 }
 
 // String primitives
+static size_t int_to_str(char *buf, long long val) {
+    return (size_t)snprintf(buf, 24, "%lld", val);
+}
+
+// (string-concat <string | integer> ...)
 static Obj *prim_string_concat(void *root, Obj **env, Obj **list) {
-    Obj *args = eval_list(root, env, list);
-    
+    DEFINE1(root, args);
+    *args = eval_list(root, env, list);
+    char num[24];
+
     // First pass: calculate total length needed
-    size_t total_len = 1;  // Start with 1 for null terminator
-    for (Obj *p = args; p != Nil; p = p->cdr) {
-        if (p->car->type != TSTRING && p->car->type != TINT)
-            error("string-concat arguments must be strings or numbers", 
-            (*list)->line_num);
-        if (p->car->type == TINT) {
-            long long val = p->car->value;
-            char var[22];
-            snprintf(var, sizeof(var), "%lld", val);
-            total_len += strlen(var);
-        }
-        else {
+    size_t total_len = 0;
+    for (Obj *p = *args; p != Nil; p = p->cdr) {
+        if (p->car->type == TINT)
+            total_len += int_to_str(num, p->car->value);
+        else if (p->car->type == TSTRING)
             total_len += strlen(p->car->name);
-        }
+        else
+            error("string-concat arguments must be strings or numbers", (*list)->line_num);
     }
-    
-    char *buf = malloc(total_len);
-    if (!buf)
-        error("Out of memory in string-concat", (*list)->line_num);
-    buf[0] = '\0';
-    
-    // Second pass: concatenate all strings
-    for (Obj *p = args; p != Nil; p = p->cdr) {
+
+    // The result is written directly in the new string. alloc may move the arguments, which
+    // are reachable through the root.
+    Obj *result = alloc(root, TSTRING, total_len + 1);
+    result->line_num = filepos.line_num;
+
+    // Second pass: copy all the strings
+    char *out = result->name;
+    for (Obj *p = *args; p != Nil; p = p->cdr) {
         if (p->car->type == TINT) {
-            long long val = p->car->value;
-            char var[22];
-            snprintf(var, sizeof(var), "%lld", val);
-            strcat(buf, var);
-        }
-        else {
-            strcat(buf, p->car->name);
+            out += int_to_str(out, p->car->value);
+        } else {
+            size_t n = strlen(p->car->name);
+            memcpy(out, p->car->name, n);
+            out += n;
         }
     }
-    
-    Obj *result = make_string(root, buf);
-    free(buf);
+    *out = '\0';
     return result;
 }
 
@@ -888,22 +994,31 @@ static Obj *prim_symbol_to_string(void *root, Obj **env, Obj **list) {
     Obj *args = eval_list(root, env, list);
     if (length(args) != 1)
         error("symbol->string requires 1 argument", (*list)->line_num);
-    
+
     if (args->car->type != TSYMBOL)
         error("symbol->string argument must be a symbol", (*list)->line_num);
-        
-    return make_string(root, args->car->name);
+
+    // The name is copied out of the GC heap before allocating
+    char name[SYMBOL_MAX_LEN + 1];
+    strncpy(name, args->car->name, sizeof(name) - 1);
+    name[sizeof(name) - 1] = '\0';
+    return make_string(root, name);
 }
 
 static Obj *prim_string_to_symbol(void *root, Obj **env, Obj **list) {
     Obj *args = eval_list(root, env, list);
     if (length(args) != 1)
         error("string->symbol requires 1 argument", (*list)->line_num);
-    
+
     if (args->car->type != TSTRING)
         error("string->symbol argument must be a string", (*list)->line_num);
-        
-    return intern(root, args->car->name);
+    if (strlen(args->car->name) > SYMBOL_MAX_LEN)
+        error("Symbol name too long", (*list)->line_num);
+
+    // The name is copied out of the GC heap before allocating
+    char name[SYMBOL_MAX_LEN + 1];
+    strcpy(name, args->car->name);
+    return intern(root, name);
 }
 
 static Obj *prim_exit(void *root, Obj **env, Obj **list) {
@@ -912,7 +1027,7 @@ static Obj *prim_exit(void *root, Obj **env, Obj **list) {
     Obj *values = eval_list(root, env, list);
     Obj *first = values->car; 
     if (first->type != TINT)
-        error("* must be an integer", (*list)->line_num);
+        error("exit takes an integer", (*list)->line_num);
     exit(first->value);
 }
 
@@ -929,33 +1044,37 @@ static void define_constants(void *root, Obj **env) {
     add_variable(root, env, sym, &True);
 }
 
-static size_t read_file(char *fname, char **text) {
-    size_t length = 0;
-    FILE *f = fopen(fname, "r");
+// Reads the whole file in a newly allocated buffer. Returns its length, or -1 on failure.
+static long read_file(char *fname, char **text) {
+    *text = NULL;
+    FILE *f = fopen(fname, "rb");
     if (!f) {
         printf("Failed to load file %s\n", fname);
-        return 0;
+        return -1;
     }
 
-    filepos.filename = fname;
     fseek(f, 0, SEEK_END);
-    length = ftell(f);
+    long length = ftell(f);
     fseek(f, 0, SEEK_SET);
-    
+    if (length < 0) {
+        printf("Failed to read file %s\n", fname);
+        fclose(f);
+        return -1;
+    }
+
     *text = malloc(length + 1);
     if (!*text) {
         puts("Out of memory.");
         fclose(f);
-        return 0;
+        return -1;
     }
 
-    size_t read = fread(*text, 1, length, f);
-    if (read != length) {
+    if (fread(*text, 1, length, f) != (size_t)length) {
         printf("Failed to read entire file %s\n", fname);
         free(*text);
         *text = NULL;
         fclose(f);
-        return 0;
+        return -1;
     }
 
     (*text)[length] = '\0';
@@ -963,36 +1082,25 @@ static size_t read_file(char *fname, char **text) {
     return length;
 }
 
-void process_file(char *fname, Obj **env, Obj **expr) {
+// Evaluates all the expressions of a file. fname must stay valid until the function returns.
+void process_file(void *root, char *fname, Obj **env, Obj **expr) {
     char *text = NULL;
-    size_t len = read_file(fname, &text);
-    if (len == 0) return;
+    long len = read_file(fname, &text);
+    if (len < 0) return;
 
-    // Save old stdin
-    FILE *old_stdin = stdin;
-    // Create a single stream for the entire file
-    FILE *stream = fmemopen(text, len, "r");
-    if (!stream) {
-        free(text);
-        error("Failed to create memory stream for %s", (*expr)->line_num, fname);
-        return;
-    }
-
-    // Redirect stdin to the memory stream
-    stdin = stream;
+    filepos_t calling_file = filepos;
+    reader_t calling_reader = reader;
+    set_input(text, len);
     filepos.filename = fname;
     filepos.file_len = len;
     filepos.line_num = 1;
 
-    int eval_input(void *root, Obj **env, Obj **expr);
-    // Process expressions until we reach end of file
-    while (!feof(stream)) {
-        eval_input(gc_root, env, expr);
-    }
+    // eval_input stops at the first error: go on with the rest of the file
+    while (reader.pos < reader.len)
+        eval_input(root, env, expr);
 
-    // Cleanup
-    stdin = old_stdin;
-    fclose(stream);
+    reader = calling_reader;
+    filepos = calling_file;
     free(text);
 }
 
@@ -1014,7 +1122,6 @@ static void define_primitives(void *root, Obj **env) {
     add_primitive(root, env, "mod", prim_modulo);
     add_primitive(root, env, "length", prim_length);
     add_primitive(root, env, "reverse", prim_reverse);
-    add_primitive(root, env, "<", prim_lt);
     add_primitive(root, env, "<", prim_lt);
     add_primitive(root, env, ">", prim_gt);
     add_primitive(root, env, "<=", prim_lte);
@@ -1042,18 +1149,18 @@ static void define_primitives(void *root, Obj **env) {
 // Entry point
 //======================================================================
 
-extern void *memory;
-
 void init_minilisp(Obj **env) {
     // Memory allocation
-    extern void *alloc_semispace();
-    memory = alloc_semispace();
+    gc_init();
+    init_small_ints();
+    init_stack_limit();
 
-    // Constants and primitives
+    // Constants and primitives. env is a slot of the caller's root frame (gc_root), which must be
+    // used as the root: the environment would not survive a GC otherwise.
     Symbols = Nil;
-    *env = make_env(NULL, &Nil, &Nil);
-    define_constants(NULL, env);
-    define_primitives(NULL, env);
+    *env = make_env(gc_root, &Nil, &Nil);
+    define_constants(gc_root, env);
+    define_primitives(gc_root, env);
 }
 
 int eval_input(void *root, Obj **env, Obj **expr) {
@@ -1063,9 +1170,9 @@ int eval_input(void *root, Obj **env, Obj **expr) {
             if (!*expr) 
                 return 0;
             if (*expr == Cparen)
-                error("Stray close parenthesis", (*expr)->line_num);
+                error("Stray close parenthesis", filepos.line_num);
             if (*expr == Dot)
-                error("Stray dot", (*expr)->line_num);
+                error("Stray dot", filepos.line_num);
             print(eval(root, env, expr));
             putc('\n', stdout);
         }

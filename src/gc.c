@@ -1,28 +1,36 @@
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <stddef.h>
 #include <string.h>
 #include <stdint.h>
 #include <sys/mman.h>
 #include "gc.h"
 
-extern void error(char *fmt, int line_num, ...);
 extern filepos_t filepos;
 
-// The pointer pointing to the beginning of the current heap
+// The pointer pointing to the beginning of the current heap (the semi-space we allocate from)
 void *memory;
 
-// The pointer pointing to the beginning of the old heap
+// The size in bytes of the current heap
+size_t heap_size = MEMORY_SIZE;
+
+// The unused semi-space. It is kept mapped between two collections, so that a collection does not
+// have to ask the kernel for fresh pages every time. It becomes the to-space of the next GC.
+static void *spare_space;
+static size_t spare_size;
+
+// The old heap while a collection is running
 static void *from_space;
+static size_t from_size;
 
 // The number of bytes allocated from the heap
 size_t mem_nused = 0;
 
 // Flags to debug GC
- bool gc_running = false;
- bool debug_gc = false;
- bool always_gc = false;
-
+bool gc_running = false;
+bool debug_gc = false;
+bool always_gc = false;
 
 // The list containing all symbols. Such data structure is traditionally called the "obarray", but I
 // avoid using it as a variable name as this is not an array but a list.
@@ -33,6 +41,31 @@ Obj *Symbols;
 // these bit operations may look a little bit tricky, but it's efficient and thus frequently used.
 static inline size_t roundup(size_t var, size_t size) {
     return (var + size - 1) & ~(size - 1);
+}
+
+// Returns true if the environment variable is defined and not the empty string.
+static bool getEnvFlag(char *name) {
+    char *val = getenv(name);
+    return val && val[0];
+}
+
+static void *map_space(size_t size) {
+    void *p = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+    return p == MAP_FAILED ? NULL : p;
+}
+
+// Allocates the two semi-spaces and reads the debug flags. Must be called once at startup.
+void gc_init(void) {
+    debug_gc = getEnvFlag("MINILISP_DEBUG_GC");
+    always_gc = getEnvFlag("MINILISP_ALWAYS_GC");
+    heap_size = spare_size = MEMORY_SIZE;
+    memory = map_space(heap_size);
+    spare_space = map_space(spare_size);
+    if (!memory || !spare_space) {
+        fputs("Cannot allocate the heap\n", stderr);
+        exit(1);
+    }
+    mem_nused = 0;
 }
 
 // Allocates memory block. This may start GC if we don't have enough memory.
@@ -49,27 +82,30 @@ Obj *alloc(void *root, int type, size_t size) {
     // boundary as the pointer.
     size = roundup(size, sizeof(void *));
 
-    // If the debug flag is on, allocate a new memory space to force all the existing objects to
-    // move to new addresses, to invalidate the old addresses. By doing this the GC behavior becomes
-    // more predictable and repeatable. If there's a memory bug that the C variable has a direct
-    // reference to a Lisp object, the pointer will become invalid by this GC call. Dereferencing
-    // that will immediately cause SEGV.
-    if (always_gc && !gc_running)
-        gc(root);
-
+    // If the debug flag is on, run a GC at every allocation to force all the existing objects to
+    // move to new addresses, and make the old heap inaccessible. By doing this the GC behavior
+    // becomes more predictable and repeatable. If there's a memory bug that the C variable has a
+    // direct reference to a Lisp object, the pointer will become invalid by this GC call.
+    // Dereferencing that will immediately cause SEGV.
     // Otherwise, run GC only when the available memory is not large enough.
-    if (!always_gc && MEMORY_SIZE < mem_nused + size)
+    if (always_gc || heap_size < mem_nused + size)
         gc(root);
 
-    // Terminate the program if we couldn't satisfy the memory request. This can happen if the
-    // requested size was too large or the from-space was filled with too many live objects.
-    if (MEMORY_SIZE < mem_nused + size)
+    // The request is larger than what is left after GC: grow the heap.
+    while (heap_size < mem_nused + size && heap_size < MAX_HEAP_SIZE)
+        if (!gc_collect(root, heap_size * 2))
+            break;
+
+    // Give up if we couldn't satisfy the memory request. This can happen if the requested size
+    // was too large or the heap was filled with too many live objects.
+    if (heap_size < mem_nused + size)
         error("Memory exhausted", filepos.line_num);
 
-    // Allocate the object.
-    Obj *obj = memory + mem_nused;
+    // Allocate the object. The heap is not necessarily zeroed (it can be a recycled semi-space).
+    Obj *obj = (Obj *)((uint8_t *)memory + mem_nused);
     obj->type = type;
     obj->size = size;
+    obj->line_num = 0;
     mem_nused += size;
     return obj;
 }
@@ -92,7 +128,7 @@ static inline Obj *forward(Obj *obj) {
     // If the object's address is not in the from-space, the object is not managed by GC nor it
     // has already been moved to the to-space.
     ptrdiff_t offset = (uint8_t *)obj - (uint8_t *)from_space;
-    if (offset < 0 || MEMORY_SIZE <= offset)
+    if (offset < 0 || (size_t)offset >= from_size)
         return obj;
 
     // The pointer is pointing to the from-space, but the object there was a tombstone. Follow the
@@ -112,10 +148,6 @@ static inline Obj *forward(Obj *obj) {
     return newloc;
 }
 
-void *alloc_semispace() {
-    return mmap(NULL, MEMORY_SIZE, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
-}
-
 // Copies the root objects.
 static void forward_root_objects(void *root) {
     Symbols = forward(Symbols);
@@ -125,26 +157,26 @@ static void forward_root_objects(void *root) {
                 frame[i] = forward(frame[i]);
 }
 
-
-// Returns true if the environment variable is defined and not the empty string.
-static bool getEnvFlag(char *name) {
-    char *val = getenv(name);
-    return val && val[0];
-}
-
-// Implements Cheney's copying garbage collection algorithm.
-// http://en.wikipedia.org/wiki/Cheney%27s_algorithm
-void gc(void *root) {
+// Copies all the live objects to a to-space of new_size bytes, which becomes the heap. Returns
+// false, leaving the heap untouched, if the new to-space could not be allocated.
+bool gc_collect(void *root, size_t new_size) {
     assert(!gc_running);
+
+    // Get the to-space: reuse the spare semi-space when it has the right size.
+    void *to_space = spare_space;
+    if (spare_size != new_size) {
+        to_space = map_space(new_size);
+        if (!to_space)
+            return false;
+        munmap(spare_space, spare_size);
+    } else if (always_gc) {
+        mprotect(to_space, new_size, PROT_READ | PROT_WRITE);
+    }
     gc_running = true;
 
-    // Debug flags
-    debug_gc = getEnvFlag("MINILISP_DEBUG_GC");
-    always_gc = getEnvFlag("MINILISP_ALWAYS_GC");
-
-    // Allocate a new semi-space.
     from_space = memory;
-    memory = alloc_semispace();
+    from_size = heap_size;
+    memory = to_space;
 
     // Initialize the two pointers for GC. Initially they point to the beginning of the to-space.
     scan1 = scan2 = memory;
@@ -178,16 +210,35 @@ void gc(void *root) {
             scan1->up = forward(scan1->up);
             break;
         default:
-            error("Bug: copy: unknown type %d", scan1->type);
+            // The heap is corrupted: we cannot recover from this, nor unwind safely.
+            fprintf(stderr, "Bug: copy: unknown type %d\n", scan1->type);
+            abort();
         }
         scan1 = (Obj *)((uint8_t *)scan1 + scan1->size);
     }
 
-    // Finish up GC.
-    munmap(from_space, MEMORY_SIZE);
+    // Finish up GC: the old heap becomes the spare semi-space. In debug mode, make it inaccessible
+    // so that any stale pointer to it crashes immediately.
     size_t old_nused = mem_nused;
+    spare_space = from_space;
+    spare_size = from_size;
+    if (always_gc)
+        mprotect(spare_space, spare_size, PROT_NONE);
+    heap_size = new_size;
     mem_nused = (size_t)((uint8_t *)scan1 - (uint8_t *)memory);
     if (debug_gc)
         fprintf(stderr, "GC: %zu bytes out of %zu bytes copied.\n", mem_nused, old_nused);
     gc_running = false;
+    return true;
+}
+
+// Implements Cheney's copying garbage collection algorithm.
+// http://en.wikipedia.org/wiki/Cheney%27s_algorithm
+// If more than half of the heap is still in use afterwards, the heap is doubled, otherwise we
+// would collect again and again after every few allocations.
+void gc(void *root) {
+    gc_collect(root, heap_size);
+    while (mem_nused > heap_size / 2 && heap_size < MAX_HEAP_SIZE)
+        if (!gc_collect(root, heap_size * 2))
+            break;
 }

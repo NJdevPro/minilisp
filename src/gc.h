@@ -9,10 +9,14 @@
 // Memory management
 //======================================================================
 
-// The size of the heap in byte
-#define MEMORY_SIZE 65536 * 4
+// The initial size in bytes of each semi-space. The heap grows (up to MAX_HEAP_SIZE) when too much
+// of it is still in use after a collection.
+#define MEMORY_SIZE (65536 * 64)
+#define MAX_HEAP_SIZE ((size_t)1 << 30)
 
 extern void *gc_root;    // root of memory
+extern size_t heap_size; // current size in bytes of one semi-space
+extern size_t mem_nused; // number of bytes currently allocated in the heap
 
 // Currently we are using Cheney's copying GC algorithm, with which the available memory is split
 // into two halves and all objects are moved from one half to another every time GC is invoked. That
@@ -69,8 +73,9 @@ static inline void** add_root_frame(void **prev_frame, int size, void *frame[]) 
     Obj **var4 = (Obj **)(root_frame + 4);
 
 
-void *alloc_semispace();
+void gc_init(void);
 Obj *alloc(void *root, int type, size_t size);
 void gc(void *root);
+bool gc_collect(void *root, size_t new_size);
 
 #endif

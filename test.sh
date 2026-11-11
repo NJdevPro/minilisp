@@ -163,6 +163,9 @@ run counter 3 '
   (counter)
   (counter)'
 
+run print 'hello world 3()' '(print "hello" "world" 3)'
+run println '()' '(println)'
+
 run progn 'I own 10 cents()' '(progn (print "I own ") 
                               (defun add(x y)(+ x y))
                               (print (add 3 7)) 

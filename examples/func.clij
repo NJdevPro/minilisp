@@ -1,0 +1,38 @@
+; take: returns first n elements of a list
+(defun null?(x) (eq () x))
+
+(defun take(lst n)
+  (if (or (= n 0) (null? lst))
+      '()
+      (cons (car lst)
+            (take (cdr lst) (- n 1)))))
+
+; drop: removes first n elements from a list
+(defun drop(lst n)
+  (if (or (= n 0) (null? lst))
+      lst
+      (drop (cdr lst) (- n 1))))
+
+; partition: splits list into sublists of size n
+(defun partition(lst n)
+  (if (null? lst)
+      '()
+      (cons (take lst n)
+            (partition (drop lst n) n))))
+
+; Example usage:
+(define sample-list (list 1 2 3 4 5 6))
+
+; take examples
+(take sample-list 0)  ; => ()
+(take sample-list 3)  ; => (1 2 3)
+(take sample-list 6)  ; => (1 2 3 4 5 6)
+
+; drop examples
+(drop sample-list 0)  ; => (1 2 3 4 5 6)
+(drop sample-list 3)  ; => (4 5 6)
+(drop sample-list 6)  ; => ()
+
+; partition examples
+(partition sample-list 2)  ; => ((1 2) (3 4) (5 6))
+(partition sample-list 3)  ; => ((1 2 3) (4 5 6))

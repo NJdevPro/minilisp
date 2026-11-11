@@ -2,7 +2,7 @@
 ;;; Conway's game of life
 ;;;
 
-(load "examples/library.lisp")
+(load "library.lisp")
 
 (define width 15)
 (define height 15)
