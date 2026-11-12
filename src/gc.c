@@ -190,6 +190,7 @@ bool gc_collect(void *root, size_t new_size) {
     while (scan1 < scan2) {
         switch (scan1->type) {
         case TINT:
+        case TFLOAT:
         case TPRIMITIVE:
         case TSTRING:
             // Any of the above types does not contain a pointer to a GC-managed object.

@@ -172,10 +172,13 @@ The above expression prints "3".
 
 ### Literals
 
-MiniLisp supports integer literals, string literals, `()`, `t`, symbols, and
+MiniLisp supports integer literals, float literals, string literals, `()`, `t`, symbols, and
 list literals.
 
 * Integer literals are positive or negative 64 bit integers.
+* Float literals are double precision numbers. They have a fractional part, an
+  exponent, or both: `1.5`, `-0.25`, `1e3`, `2.5E-4`. A digit is required on
+  both sides of the point, so `1.` and `.5` are not floats.
 * String literals are written between double quotes. The escape sequences `\n`,
   `\t`, `\r`, `\"` and `\\` are recognized.
 * `()` is the only false value. It also represents the empty list.
@@ -224,7 +227,9 @@ car.
 ### Numeric operators
 
 Integers are 64 bit signed integers. The result of an operation that overflows
-wraps around. Numeric operators only accept integers.
+wraps around. Floats are double precision numbers. Numeric operators accept
+integers and floats: when at least one argument is a float, the integers are
+converted and the result is a float, otherwise the result is an integer.
 
 `+` returns the sum of the arguments.
 
@@ -250,17 +255,22 @@ If multiple arguments are given, `-` subtracts each argument from the first one.
 
 `/` divides the first argument by each of the following ones, and `mod` returns
 the remainder of the same division. The division of integers is truncated
-towards zero. Dividing by zero is an error.
+towards zero (the remainder has the sign of the dividend), the one of floats is
+not. Dividing by zero is an error.
 
     (/ 7 2)    ; -> 3
     (/ -7 2)   ; -> -3
     (mod 7 2)  ; -> 1
     (mod -7 2) ; -> -1
+    (/ 7 2.0)  ; -> 3.5
+    (mod 7.5 2) ; -> 1.5
 
-`=` takes two arguments and returns `t` if the two are the same integer.
+`=` takes two arguments and returns `t` if the two numbers are equal, whatever
+their types.
 
     (= 11 11)  ; -> t
     (= 11 6)   ; -> ()
+    (= 1 1.0)  ; -> t
 
 `<` takes two arguments and returns `t` if the first argument is smaller than
 the second.
@@ -322,10 +332,38 @@ about 25000 calls.
            (print (add 3 7))
            (println " cents"))  ; -> prints "I own 10 cents"
 
+### Floats
+
+A float is always printed with a point or an exponent (`2.0`, `1e+21`), and with
+as many digits as needed to read it back unchanged. Overflows give `inf` or
+`-inf`.
+
+`float` converts a number to a float. `truncate` (towards zero), `floor` and
+`round` (to the nearest integer, halves away from zero) convert a number to an
+integer, and are an error if the float does not fit in 64 bits.
+
+    (float 3)         ; -> 3.0
+    (truncate -2.7)   ; -> -2
+    (floor -2.7)      ; -> -3
+    (round 2.5)       ; -> 3
+
+`sqrt`, `exp`, `log`, `sin`, `cos` and `atan` take one number and return a
+float. `(expt x y)` returns `x` raised to the power `y`. `sqrt` of a negative
+number and `log` of a number which is not positive are errors.
+
+    (sqrt 2)          ; -> 1.4142135623730951
+    (expt 2 10)       ; -> 1024.0
+
+`float?` and `integer?` tell the type of a number.
+
+    (float? 1.5)      ; -> t
+    (integer? 1.5)    ; -> ()
+
 ### Equivalence test operators
 
 `eq` takes two arguments and returns `t` if the objects are the same. Integers
-are compared by value and strings by content. For all the other objects `eq` does
+and floats are compared by value (but an integer is never `eq` to a float, as
+opposed to `=`), and strings by content. For all the other objects `eq` does
 a pointer comparison, so two lists that happened to have the same contents but
 are actually different are considered to not be the same by `eq`.
 

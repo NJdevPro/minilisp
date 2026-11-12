@@ -27,6 +27,7 @@ enum {
     // handle the object of this type. Other functions will never see the object of this type.
     TMOVED,
     TSTRING,
+    TFLOAT,
     // Const objects. They are statically allocated and will never be managed by GC.
     TTRUE,
     TNIL,
@@ -64,6 +65,8 @@ typedef struct Obj {
             struct Obj *car;
             struct Obj *cdr;
         };
+        // Float
+        double fvalue;
         // String
         char name[1];
         // Symbol: the binding of the symbol in the global environment, i.e. the pair

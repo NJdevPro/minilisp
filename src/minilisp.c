@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <limits.h>
+#include <math.h>
 #include <setjmp.h>
 #include <string.h>
 #include <sys/resource.h>
@@ -64,6 +65,58 @@ static Obj *make_int(void *root, long long value) {
     r->value = value;
     r->line_num = filepos.line_num;
     return r;
+}
+
+static Obj *make_float(void *root, double value) {
+    Obj *r = alloc(root, TFLOAT, sizeof(double));
+    r->fvalue = value;
+    r->line_num = filepos.line_num;
+    return r;
+}
+
+static inline bool is_number(const Obj *obj) {
+    return obj->type == TINT || obj->type == TFLOAT;
+}
+
+// The value of a number (an integer or a float) as a double
+static inline double to_double(const Obj *obj) {
+    return obj->type == TINT ? (double)obj->value : obj->fvalue;
+}
+
+// Writes the shortest decimal representation which is read back as the same float: plain decimal
+// notation for the usual magnitudes, and the exponent notation for the others. A float is always
+// written with a point or an exponent, so that it is not mistaken for an integer.
+static size_t float_to_str(char *buf, size_t size, double val) {
+    if (isnan(val))
+        return (size_t)snprintf(buf, size, "nan");
+    if (isinf(val))
+        return (size_t)snprintf(buf, size, val < 0 ? "-inf" : "inf");
+    // Find the smallest number of significant digits which does not lose anything
+    int digits = 1;
+    char sci[32];
+    for (; digits <= 17; digits++) {
+        snprintf(sci, sizeof(sci), "%.*e", digits - 1, val);
+        if (strtod(sci, NULL) == val)
+            break;
+    }
+    if (digits > 17)
+        digits = 17;
+    int exp10 = atoi(strchr(sci, 'e') + 1);
+    if (val == 0 || (-5 <= exp10 && exp10 < 16)) {
+        int decimals = digits - 1 - exp10;
+        if (decimals < 1)
+            decimals = 1;
+        return (size_t)snprintf(buf, size, "%.*f", decimals, val);
+    }
+    return (size_t)snprintf(buf, size, "%s", sci);
+}
+
+// Writes a number (an integer or a float) in buf, which must hold NUM_STR_SIZE bytes.
+#define NUM_STR_SIZE 40
+static size_t num_to_str(char *buf, const Obj *num) {
+    if (num->type == TINT)
+        return (size_t)snprintf(buf, NUM_STR_SIZE, "%lld", num->value);
+    return float_to_str(buf, NUM_STR_SIZE, num->fvalue);
 }
 
 static Obj *cons(void *root, Obj **car, Obj **cdr) {
@@ -146,8 +199,12 @@ void set_input(const char *text, size_t len) {
     reader = (reader_t){ text, len, 0 };
 }
 
+static inline int peek_at(size_t n) {
+    return reader.pos + n < reader.len ? (unsigned char)reader.text[reader.pos + n] : EOF;
+}
+
 static inline int peek(void) {
-    return reader.pos < reader.len ? (unsigned char)reader.text[reader.pos] : EOF;
+    return peek_at(0);
 }
 
 static int read_char(void) {
@@ -270,6 +327,47 @@ static long long read_number(long long val) {
     return val;
 }
 
+// If the number being read is a float (it has a fractional part, or an exponent), returns the
+// number of characters which follow its first one. Otherwise returns 0. The input is not consumed.
+static size_t float_literal_len(void) {
+    size_t n = 0;
+    bool is_float = false;
+    while (isdigit(peek_at(n)))
+        n++;
+    if (peek_at(n) == '.' && isdigit(peek_at(n + 1))) {
+        is_float = true;
+        for (n++; isdigit(peek_at(n)); n++)
+            ;
+    }
+    if (peek_at(n) == 'e' || peek_at(n) == 'E') {
+        size_t m = n + 1;
+        if (peek_at(m) == '+' || peek_at(m) == '-')
+            m++;
+        if (isdigit(peek_at(m))) {
+            is_float = true;
+            for (n = m; isdigit(peek_at(n)); n++)
+                ;
+        }
+    }
+    return is_float ? n : 0;
+}
+
+// Reads a float literal, whose first character c has been read and which is followed by len
+// characters.
+static Obj *read_float(void *root, char c, size_t len) {
+    char buf[64];
+    if (len >= sizeof(buf))
+        error("Number too long", filepos.line_num);
+    buf[0] = c;
+    for (size_t i = 1; i <= len; i++)
+        buf[i] = (char)read_char();
+    buf[len + 1] = '\0';
+    double val = strtod(buf, NULL);
+    if (isinf(val))
+        error("Float too large", filepos.line_num);
+    return make_float(root, val);
+}
+
 static Obj *read_symbol(void *root, char c) {
     char buf[SYMBOL_MAX_LEN + 1];
     buf[0] = c;
@@ -326,10 +424,12 @@ static Obj *read_expr(void *root) {
             return read_quote(root);
         if (c == '"')
             return read_string(root);
-        if (isdigit(c))
-            return make_int(root, read_number(c - '0'));
-        if (c == '-' && isdigit(peek()))
-            return make_int(root, -read_number(0));
+        if (isdigit(c) || (c == '-' && isdigit(peek()))) {
+            size_t len = float_literal_len();
+            if (len)
+                return read_float(root, (char)c, len);
+            return make_int(root, c == '-' ? -read_number(0) : read_number(c - '0'));
+        }
         if (isalpha(c) || is_symbol_char(c))
             return read_symbol(root, c);
         if (c == EOF)
@@ -361,6 +461,12 @@ static void print(Obj *obj) {
 
     case TINT   : printf("%lld", obj->value);
         break;
+    case TFLOAT: {
+        char buf[NUM_STR_SIZE];
+        float_to_str(buf, sizeof(buf), obj->fvalue);
+        fputs(buf, stdout);
+        break;
+    }
     case TSYMBOL: fputs(obj->sym_name, stdout);
         break;
     case TPRIMITIVE: fputs("<primitive>", stdout);
@@ -532,6 +638,7 @@ static Obj *prim_or(void *root, Obj **env, Obj **list);
 static inline Obj *eval_simple(Obj **env, Obj *obj) {
     switch (obj->type) {
     case TINT:
+    case TFLOAT:
     case TPRIMITIVE:
     case TFUNCTION:
     case TTRUE:
@@ -818,17 +925,39 @@ static Obj *prim_reverse(void *root, Obj **env, Obj **list) {
           (*list)->line_num);
 }
 
-// (op <integer> ...) with op one of + - * / %
-// Arithmetic wraps around on overflow, like the unsigned arithmetic does.
+// (op <number> ...) with op one of + - * / %
+// Integer arithmetic wraps around on overflow, like the unsigned arithmetic does. As soon as one of
+// the arguments is a float, the computation is done with floats.
 static Obj *arith(void *root, Obj **env, Obj **list, char op) {
     Obj *args = eval_list(root, env, list);
-    for (Obj *p = args; p != Nil; p = p->cdr)
-        if (p->car->type != TINT)
+    bool is_float = false;
+    for (Obj *p = args; p != Nil; p = p->cdr) {
+        if (!is_number(p->car))
             error("%c takes only numbers", (*list)->line_num, op);
+        is_float |= p->car->type == TFLOAT;
+    }
     if (args == Nil) {
         if (op == '+') return make_int(root, 0);
         if (op == '*') return make_int(root, 1);
         error("%c takes at least 1 number", (*list)->line_num, op);
+    }
+    if (is_float) {
+        double r = to_double(args->car);
+        if (op == '-' && args->cdr == Nil)
+            return make_float(root, -r);
+        for (Obj *p = args->cdr; p != Nil; p = p->cdr) {
+            double v = to_double(p->car);
+            switch (op) {
+            case '+': r += v; break;
+            case '-': r -= v; break;
+            case '*': r *= v; break;
+            default:  // '/' and '%'
+                if (v == 0)
+                    error("Division by zero", (*list)->line_num);
+                r = op == '/' ? r / v : fmod(r, v);
+            }
+        }
+        return make_float(root, r);
     }
     unsigned long long r = args->car->value;
     if (op == '-' && args->cdr == Nil)
@@ -851,15 +980,16 @@ static Obj *arith(void *root, Obj **env, Obj **list, char op) {
     return make_int(root, (long long)r);
 }
 
-// (+ <integer> ...)
+// (+ <number> ...)
 static Obj *prim_plus(void *root, Obj **env, Obj **list)   { return arith(root, env, list, '+'); }
-// (- <integer> ...)
+// (- <number> ...)
 static Obj *prim_minus(void *root, Obj **env, Obj **list)  { return arith(root, env, list, '-'); }
 static Obj *prim_mult(void *root, Obj **env, Obj **list)   { return arith(root, env, list, '*'); }
 static Obj *prim_div(void *root, Obj **env, Obj **list)    { return arith(root, env, list, '/'); }
 static Obj *prim_modulo(void *root, Obj **env, Obj **list) { return arith(root, env, list, '%'); }
 
-// (op <integer> <integer>)
+// (op <number> <number>)
+// Two integers are compared as integers, otherwise the comparison is done with floats.
 #define PRIM_COMPARISON_OP(PRIM_OP, OP)                             \
 static Obj *PRIM_OP(void *root, Obj **env, Obj **list) {            \
     Obj *args = eval_list(root, env, list);                         \
@@ -867,9 +997,11 @@ static Obj *PRIM_OP(void *root, Obj **env, Obj **list) {            \
         error(#OP " takes only 2 number", (*list)->line_num);       \
     Obj *x = args->car;                                             \
     Obj *y = args->cdr->car;                                        \
-    if (x->type != TINT || y->type != TINT)                         \
+    if (!is_number(x) || !is_number(y))                             \
         error(#OP " takes only 2 numbers", (*list)->line_num);      \
-    return x->value OP y->value ? True : Nil;                       \
+    if (x->type == TINT && y->type == TINT)                         \
+        return x->value OP y->value ? True : Nil;                   \
+    return to_double(x) OP to_double(y) ? True : Nil;               \
 }
 
 PRIM_COMPARISON_OP(prim_num_eq, ==)
@@ -877,6 +1009,87 @@ PRIM_COMPARISON_OP(prim_lt, <)
 PRIM_COMPARISON_OP(prim_lte, <=)
 PRIM_COMPARISON_OP(prim_gt, >)
 PRIM_COMPARISON_OP(prim_gte, >=)
+
+// Evaluates the only argument of the primitive, which must be a number.
+static Obj *number_arg(void *root, Obj **env, Obj **list, const char *name) {
+    Obj *args = eval_list(root, env, list);
+    if (length(args) != 1)
+        error("%s takes 1 argument", (*list)->line_num, name);
+    if (!is_number(args->car))
+        error("%s takes a number", (*list)->line_num, name);
+    return args->car;
+}
+
+// (float <number>) converts a number to a float
+static Obj *prim_float(void *root, Obj **env, Obj **list) {
+    Obj *x = number_arg(root, env, list, "float");
+    return x->type == TFLOAT ? x : make_float(root, (double)x->value);
+}
+
+// Converts a float to an integer, once it has been rounded by fn.
+static Obj *to_integer(void *root, Obj **env, Obj **list, const char *name, double (*fn)(double)) {
+    Obj *x = number_arg(root, env, list, name);
+    if (x->type == TINT)
+        return x;
+    double v = fn(x->fvalue);
+    // 2^63 is not representable as a long long, and is the first value out of the range
+    if (!(v >= -9223372036854775808.0 && v < 9223372036854775808.0))
+        error("%s: the float is out of the range of the integers", (*list)->line_num, name);
+    return make_int(root, (long long)v);
+}
+
+// (truncate <number>) (floor <number>) (round <number>) return an integer
+static Obj *prim_truncate(void *root, Obj **env, Obj **list) {
+    return to_integer(root, env, list, "truncate", trunc);
+}
+static Obj *prim_floor(void *root, Obj **env, Obj **list) {
+    return to_integer(root, env, list, "floor", floor);
+}
+static Obj *prim_round(void *root, Obj **env, Obj **list) {
+    return to_integer(root, env, list, "round", round);
+}
+
+// The functions of one number which return a float
+static Obj *math1(void *root, Obj **env, Obj **list, const char *name, double (*fn)(double)) {
+    double x = to_double(number_arg(root, env, list, name));
+    if (fn == sqrt && x < 0)
+        error("sqrt of a negative number", (*list)->line_num);
+    if (fn == log && x <= 0)
+        error("log of a number which is not positive", (*list)->line_num);
+    return make_float(root, fn(x));
+}
+static Obj *prim_sqrt(void *root, Obj **env, Obj **list) { return math1(root, env, list, "sqrt", sqrt); }
+static Obj *prim_exp(void *root, Obj **env, Obj **list)  { return math1(root, env, list, "exp", exp); }
+static Obj *prim_log(void *root, Obj **env, Obj **list)  { return math1(root, env, list, "log", log); }
+static Obj *prim_sin(void *root, Obj **env, Obj **list)  { return math1(root, env, list, "sin", sin); }
+static Obj *prim_cos(void *root, Obj **env, Obj **list)  { return math1(root, env, list, "cos", cos); }
+static Obj *prim_atan(void *root, Obj **env, Obj **list) { return math1(root, env, list, "atan", atan); }
+
+// (expt <number> <number>) returns the first number raised to the power of the second one
+static Obj *prim_expt(void *root, Obj **env, Obj **list) {
+    Obj *args = eval_list(root, env, list);
+    if (length(args) != 2 || !is_number(args->car) || !is_number(args->cdr->car))
+        error("expt takes 2 numbers", (*list)->line_num);
+    double x = to_double(args->car), y = to_double(args->cdr->car);
+    double r = pow(x, y);
+    if (isnan(r))
+        error("expt: the result is not a real number", (*list)->line_num);
+    return make_float(root, r);
+}
+
+// (float? <expr>) (integer? <expr>)
+static Obj *prim_float_p(void *root, Obj **env, Obj **list) {
+    Obj *args = eval_list(root, env, list);
+    if (length(args) != 1)
+        error("float? takes 1 argument", (*list)->line_num);
+    return args->car->type == TFLOAT ? True : Nil;
+}
+static Obj *prim_integer_p(void *root, Obj **env, Obj **list) {
+    Obj *args = eval_list(root, env, list);
+    if (length(args) != 1)
+        error("integer? takes 1 argument", (*list)->line_num);
+    return args->car->type == TINT ? True : Nil;
+}
 
 // (not <cell>)
 static Obj *prim_not(void *root, Obj **env, Obj **list) {
@@ -1062,6 +1275,8 @@ static Obj *prim_eq(void *root, Obj **env, Obj **list) {
     Obj *second = values->cdr->car;
     if (first->type == TINT && second->type == TINT)
         return first->value == second->value ? True : Nil;
+    if (first->type == TFLOAT && second->type == TFLOAT)
+        return first->fvalue == second->fvalue ? True : Nil;
     if (first->type == TSTRING){
         if (second->type == TSTRING)
             return strcmp(first->name, second->name) == 0 ? True : Nil;
@@ -1072,21 +1287,17 @@ static Obj *prim_eq(void *root, Obj **env, Obj **list) {
 }
 
 // String primitives
-static size_t int_to_str(char *buf, long long val) {
-    return (size_t)snprintf(buf, 24, "%lld", val);
-}
-
-// (string-concat <string | integer> ...)
+// (string-concat <string | number> ...)
 static Obj *prim_string_concat(void *root, Obj **env, Obj **list) {
     DEFINE1(root, args);
     *args = eval_list(root, env, list);
-    char num[24];
+    char num[NUM_STR_SIZE];
 
     // First pass: calculate total length needed
     size_t total_len = 0;
     for (Obj *p = *args; p != Nil; p = p->cdr) {
-        if (p->car->type == TINT)
-            total_len += int_to_str(num, p->car->value);
+        if (is_number(p->car))
+            total_len += num_to_str(num, p->car);
         else if (p->car->type == TSTRING)
             total_len += strlen(p->car->name);
         else
@@ -1101,8 +1312,10 @@ static Obj *prim_string_concat(void *root, Obj **env, Obj **list) {
     // Second pass: copy all the strings
     char *out = result->name;
     for (Obj *p = *args; p != Nil; p = p->cdr) {
-        if (p->car->type == TINT) {
-            out += int_to_str(out, p->car->value);
+        if (is_number(p->car)) {
+            size_t n = num_to_str(num, p->car);
+            memcpy(out, num, n);
+            out += n;
         } else {
             size_t n = strlen(p->car->name);
             memcpy(out, p->car->name, n);
@@ -1260,6 +1473,19 @@ static void define_primitives(void *root, Obj **env) {
     add_primitive(root, env, "or", prim_or);
     add_primitive(root, env, "progn", prim_progn);
     add_primitive(root, env, "=", prim_num_eq);
+    add_primitive(root, env, "float", prim_float);
+    add_primitive(root, env, "truncate", prim_truncate);
+    add_primitive(root, env, "floor", prim_floor);
+    add_primitive(root, env, "round", prim_round);
+    add_primitive(root, env, "sqrt", prim_sqrt);
+    add_primitive(root, env, "exp", prim_exp);
+    add_primitive(root, env, "log", prim_log);
+    add_primitive(root, env, "sin", prim_sin);
+    add_primitive(root, env, "cos", prim_cos);
+    add_primitive(root, env, "atan", prim_atan);
+    add_primitive(root, env, "expt", prim_expt);
+    add_primitive(root, env, "float?", prim_float_p);
+    add_primitive(root, env, "integer?", prim_integer_p);
     add_primitive(root, env, "eq", prim_eq);
     add_primitive(root, env, "print", prim_print);
     add_primitive(root, env, "println", prim_println);
