@@ -288,3 +288,28 @@ run eq t '(define v [1]) (eq v v)'
 run eq '()' '(eq [1] [1])'
 run vector 398 '(define n 200) (define v (make-vector n 1)) (define i 0) (while (< i n) (aset v i (* i 2)) (setq i (+ i 1))) (aref v (- n 1))'
 run vector '[(1 2) [3]]' "(vector '(1 2) [3])"
+
+# Size of the heap: -m is the initial size and -M the maximum, in KB.
+# check_heap NAME EXPECTED OPTIONS CODE: the last line of the output must be EXPECTED.
+function check_heap() {
+  echo -n "Testing $1 ... "
+  for gc in "" 1; do
+    result=$(MINILISP_ALWAYS_GC=$gc ./minilisp $3 -r -H -x "$4" </dev/null 2>&1 | sed 's/Command history disengaged.//' | grep -v '^$' | tail -1)
+    if [ "$result" != "$2" ]; then
+      echo FAILED
+      fail "$2 expected, but got $result"
+    fi
+  done
+  echo ok
+}
+
+check_heap 'heap fixed' 3 '-m 32 -M 32' '(length (list 1 2 3))'
+check_heap 'heap garbage' 50000 '-m 32 -M 32' '(define i 0) (while (< i 50000) (setq i (+ i 1))) i'
+check_heap 'heap exhausted' '[1]: Memory exhausted' '-m 32 -M 32' '(make-vector 5000 0)'
+check_heap 'heap grows' 5000 '-m 32 -M 100' '(length (make-vector 5000 0))'
+check_heap 'heap max is reached' '[1]: Memory exhausted' '-m 32 -M 100' '(make-vector 13000 0)'
+check_heap 'heap max clips the default' 3000 '-M 48' '(length (make-vector 3000 0))'
+check_heap 'heap long options' 3 '--heap=64 --max-heap=64' '(+ 1 2)'
+check_heap 'heap too small' 'minilisp: the heap size must be at least 32 KB' '-m 31' '1'
+check_heap 'heap not a number' "minilisp: invalid size for the heap (-m): '3x' (a number of KB is expected)" '-m 3x' '1'
+check_heap 'heap larger than max' 'minilisp: the initial heap size (-m) is larger than the maximum (-M)' '-m 64 -M 32' '1'

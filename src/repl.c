@@ -5,7 +5,9 @@
 #include <stdlib.h>
 #include <string.h>
 #endif
+#include <ctype.h>
 #include <errno.h>
+#include <stdint.h>
 #include <unistd.h>
 #include "../bestline/bestline.h"
 #include "ketopt.h"
@@ -89,7 +91,8 @@ void minilisp(char *text, size_t length, bool with_repl, Obj **env, Obj **expr) 
                 }
             } else if (line[0] == '/') {
                 if (!strncmp(line, "/memory", 7)){
-                    printf("Memory used: %zu / Total: %zu\n", mem_nused, heap_size);
+                    printf("Memory used: %zu / Total: %zu (the heap can grow up to %zu)\n",
+                           mem_nused, heap_size, max_heap_size);
                 }
                 else if (!strncmp(line, "/help", 5)){
                     puts("Type Ctrl-C to quit.");
@@ -111,13 +114,29 @@ static int num_files = 0;
 static char **filenames;
 static bool with_repl = true;
 
+// Reads a size in KB: a positive decimal integer. Exits with a message if it is something else.
+static size_t parse_size(const char *arg, const char *what) {
+    char *end = (char *)arg;
+    errno = 0;
+    unsigned long long n = isdigit((unsigned char)arg[0]) ? strtoull(arg, &end, 10) : 0;
+    if (n == 0 || *end != '\0' || errno != 0 || n > SIZE_MAX) {
+        fprintf(stderr, "minilisp: invalid size for the %s: '%s' (a number of KB is expected)\n",
+                what, arg);
+        exit(1);
+    }
+    return (size_t)n;
+}
+
 void parse_args(int argc, char **argv) {
+    size_t heap_kb = 0, max_heap_kb = 0;   // 0 when not given
 
     static ko_longopt_t long_options[] = {
         {"exec",        ko_required_argument,   300 }, // exec Lisp code
         {"no-history",  ko_no_argument,         301 }, // disable history
         {"no-repl",     ko_no_argument,         302 }, // disable the REPL
         {"help",        ko_no_argument,         303 }, // show help
+        {"heap",        ko_required_argument,   304 }, // initial heap size
+        {"max-heap",    ko_required_argument,   305 }, // maximum heap size
         {NULL,          0             ,         0   }
     };
 
@@ -140,7 +159,7 @@ void parse_args(int argc, char **argv) {
     */
     while (true) {
         // permute: the options may be given after the file names
-        int c = ketopt(&option, argc, argv, 1, "-:x:Hrh", long_options);
+        int c = ketopt(&option, argc, argv, 1, "-:x:m:M:Hrh", long_options);
         if (c == -1)
             break;
         int idx = option.longidx;
@@ -167,13 +186,27 @@ void parse_args(int argc, char **argv) {
                 with_repl = false;
                 break;
 
+            case 'm':
+            case 304: // --heap: the initial size of the heap, in KB
+                heap_kb = parse_size(option.arg, "heap (-m)");
+                break;
+
+            case 'M':
+            case 305: // --max-heap: the maximum size of the heap, in KB
+                max_heap_kb = parse_size(option.arg, "maximum heap (-M)");
+                break;
+
             case 'h':
             case 303: // --help
-                puts("minilisp [-r -x -h] FILE1 FILE2 ...\n");
+                puts("minilisp [-r -x -m -M -h] FILE1 FILE2 ...\n");
                 puts("Run the Lisp files FILE1, FILE2, ... in that order,");
                 puts("and enter the read-eval-print loop once finished.");
                 puts("-r | --no-repl    : don't enter the read-eval-print loop.");
                 puts("-x | --exec       : execute lisp code passed as argument.");
+                puts("-m | --heap KB    : initial size of the heap, in KB (default 4096, minimum 32).");
+                puts("-M | --max-heap KB: the heap grows when it is full, up to this size in KB");
+                puts("                    (default 1048576). -m and -M together with the same value");
+                puts("                    give a heap of fixed size. The memory used is twice the heap.");
                 puts("-h | --help       : print this help.");
                 exit(0);
 
@@ -192,6 +225,12 @@ void parse_args(int argc, char **argv) {
             default:
                 printf("?? ketopt returned character code 0%o ??\n", c);
         }
+    }
+
+    const char *err = gc_set_heap_limits(heap_kb, max_heap_kb);
+    if (err) {
+        fprintf(stderr, "minilisp: %s\n", err);
+        exit(1);
     }
 
     // regular arguments: run files

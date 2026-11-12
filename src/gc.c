@@ -17,6 +17,10 @@ void *memory;
 // The size in bytes of the current heap
 size_t heap_size = MEMORY_SIZE;
 
+// The size the heap starts with, and the size it cannot outgrow
+static size_t initial_heap_size = MEMORY_SIZE;
+size_t max_heap_size = MAX_HEAP_SIZE;
+
 // The unused semi-space. It is kept mapped between two collections, so that a collection does not
 // have to ask the kernel for fresh pages every time. It becomes the to-space of the next GC.
 static void *spare_space;
@@ -56,11 +60,35 @@ static void *map_space(size_t size) {
     return p == MAP_FAILED ? NULL : p;
 }
 
+const char *gc_set_heap_limits(size_t initial_kb, size_t max_kb) {
+    // Beyond this the sizes in bytes would not fit in a size_t
+    size_t limit_kb = SIZE_MAX / 1024 / 2;
+    if ((initial_kb && initial_kb > limit_kb) || (max_kb && max_kb > limit_kb))
+        return "the heap size is too large";
+    if ((initial_kb && initial_kb * 1024 < MIN_HEAP_SIZE) || (max_kb && max_kb * 1024 < MIN_HEAP_SIZE))
+        return "the heap size must be at least 32 KB";
+    size_t initial = initial_kb * 1024, max = max_kb * 1024;
+    if (!initial)
+        initial = max && max < MEMORY_SIZE ? max : MEMORY_SIZE;
+    if (!max)
+        max = initial > MAX_HEAP_SIZE ? initial : MAX_HEAP_SIZE;
+    if (initial > max)
+        return "the initial heap size (-m) is larger than the maximum (-M)";
+    initial_heap_size = initial;
+    max_heap_size = max;
+    return NULL;
+}
+
+// The size of the heap after one growth step: twice the current size, but not more than the maximum.
+static size_t grown(size_t size) {
+    return size > max_heap_size / 2 ? max_heap_size : size * 2;
+}
+
 // Allocates the two semi-spaces and reads the debug flags. Must be called once at startup.
 void gc_init(void) {
     debug_gc = getEnvFlag("MINILISP_DEBUG_GC");
     always_gc = getEnvFlag("MINILISP_ALWAYS_GC");
-    heap_size = spare_size = MEMORY_SIZE;
+    heap_size = spare_size = initial_heap_size;
     memory = map_space(heap_size);
     spare_space = map_space(spare_size);
     if (!memory || !spare_space) {
@@ -94,8 +122,8 @@ Obj *alloc(void *root, int type, size_t size) {
         gc(root);
 
     // The request is larger than what is left after GC: grow the heap.
-    while (heap_size < mem_nused + size && heap_size < MAX_HEAP_SIZE)
-        if (!gc_collect(root, heap_size * 2))
+    while (heap_size < mem_nused + size && heap_size < max_heap_size)
+        if (!gc_collect(root, grown(heap_size)))
             break;
 
     // Give up if we couldn't satisfy the memory request. This can happen if the requested size
@@ -248,7 +276,7 @@ bool gc_collect(void *root, size_t new_size) {
 // would collect again and again after every few allocations.
 void gc(void *root) {
     gc_collect(root, heap_size);
-    while (mem_nused > heap_size / 2 && heap_size < MAX_HEAP_SIZE)
-        if (!gc_collect(root, heap_size * 2))
+    while (mem_nused > heap_size / 2 && heap_size < max_heap_size)
+        if (!gc_collect(root, grown(heap_size)))
             break;
 }

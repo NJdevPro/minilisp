@@ -49,6 +49,8 @@ The options, which can be given before or after the file names, are:
 -x, --exec CODE   evaluate the Lisp code CODE
 -r, --no-repl     don't enter the read-eval-print loop
 -H, --no-history  don't load nor save the history of the REPL
+-m, --heap KB     initial size of the heap, in KB (default 4096, minimum 32)
+-M, --max-heap KB maximum size of the heap, in KB (default 1048576)
 -h, --help        print the help and exit
 ```
 
@@ -145,7 +147,28 @@ The tests run twice, the second time with the environment variable
 allocation and makes the old heap inaccessible, so that any stale pointer
 crashes immediately. `MINILISP_DEBUG_GC=1` prints a line on the standard error
 output at each collection. The heap starts at 4 MB (per semi-space) and doubles
-when more than half of it is still in use after a collection.
+when more than half of it is still in use after a collection, up to 1 GB.
+
+Size of the heap
+----------------
+
+The options `-m` (`--heap`) and `-M` (`--max-heap`) set the initial and the maximum
+size of the heap, in KB. The minimum is 32 KB, which is enough to start the
+interpreter and to load `examples/library.lisp`; a non tail recursion 1000 calls
+deep needs about 100 KB. This makes MiniLisp usable on small machines, such as a
+Raspberry Pi with little memory, and is a way to test the garbage collector with
+a tiny heap.
+
+    ./minilisp -m 256 -M 256 prog.lisp   # a heap of fixed size: 256 KB
+    ./minilisp -m 64 prog.lisp           # starts with 64 KB, may grow up to 1 GB
+    ./minilisp -M 1024 prog.lisp         # a heap of 1 MB at most (it starts with 1 MB)
+
+The collector copies the live objects from a semi-space to the other one, so the
+memory used is twice the size of the heap (and up to four times during a growth).
+A heap which cannot grow, because it has reached its maximum, ends with the error
+"Memory exhausted" when the live data do not fit anymore. `-m` alone does not limit the
+growth, `-M` does. If only `-M` is given, the heap starts at 4 MB or at the
+maximum if that is smaller.
 
 Language features
 -----------------
