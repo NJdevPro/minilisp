@@ -36,6 +36,7 @@ static Obj *True = &(Obj){ .type = TTRUE, .size = sizeof(Obj) };
 static Obj *Nil = &(Obj){ .type = TNIL, .size = sizeof(Obj) };
 static Obj *Dot = &(Obj){ .type = TDOT, .size = sizeof(Obj) };
 static Obj *Cparen = &(Obj){ .type = TCPAREN, .size = sizeof(Obj) };
+static Obj *Cbracket = &(Obj){ .type = TCBRACKET, .size = sizeof(Obj) };
 
 //======================================================================
 // Constructors
@@ -72,6 +73,22 @@ static Obj *make_float(void *root, double value) {
     r->fvalue = value;
     r->line_num = filepos.line_num;
     return r;
+}
+
+// The longest vector: its elements must fit in the heap.
+#define MAX_VECTOR_LEN ((long long)(MAX_HEAP_SIZE / sizeof(Obj *) / 2))
+
+// Creates a vector of n elements which are all *fill. The elements are set before anything else
+// can allocate, since the GC reads them.
+static Obj *make_vector(void *root, long long n, Obj **fill) {
+    if (n < 0 || n > MAX_VECTOR_LEN)
+        error("Invalid vector length", filepos.line_num);
+    Obj *v = alloc(root, TVECTOR, sizeof(long long) + (size_t)n * sizeof(Obj *));
+    v->len = n;
+    for (long long i = 0; i < n; i++)
+        v->elems[i] = *fill;
+    v->line_num = filepos.line_num;
+    return v;
 }
 
 static inline bool is_number(const Obj *obj) {
@@ -279,11 +296,13 @@ static Obj *read_list(void *root) {
             error("Unclosed parenthesis", filepos.line_num);
         if (*obj == Cparen)
             return reverse(*head);
+        if (*obj == Cbracket)
+            error("Unexpected ] in a list", filepos.line_num);
         if (*obj == Dot) {
             if (*head == Nil)
                 error("Unexpected dot at the beginning of a list", filepos.line_num);
             *last = read_expr(root);
-            if (!*last || *last == Cparen || *last == Dot)
+            if (!*last || *last == Cparen || *last == Cbracket || *last == Dot)
                 error("Expression expected after dot", filepos.line_num);
             if (read_expr(root) != Cparen)
                 error("Closed parenthesis expected after dot", filepos.line_num);
@@ -293,6 +312,31 @@ static Obj *read_list(void *root) {
         }
         *head = cons(root, obj, head);
     }
+}
+
+static Obj *intern(void *root, const char *name);
+
+// Reads a vector. Note that '[' has already been read. [a b c] is read as the call
+// (vector a b c), so that its elements are evaluated and each evaluation makes a new vector.
+static Obj *read_vector(void *root) {
+    check_stack(filepos.line_num);
+    DEFINE3(root, obj, head, sym);
+    *head = Nil;
+    for (;;) {
+        *obj = read_expr(root);
+        if (!*obj)
+            error("Unclosed bracket", filepos.line_num);
+        if (*obj == Cbracket)
+            break;
+        if (*obj == Cparen)
+            error("Unexpected ) in a vector", filepos.line_num);
+        if (*obj == Dot)
+            error("Unexpected dot in a vector", filepos.line_num);
+        *head = cons(root, obj, head);
+    }
+    *head = reverse(*head);
+    *sym = intern(root, "vector");
+    return cons(root, sym, head);
 }
 
 // May create a new symbol. If there's a symbol with the same name, it will not create a new symbol
@@ -418,6 +462,10 @@ static Obj *read_expr(void *root) {
             return read_list(root);
         if (c == ')')
             return Cparen;
+        if (c == '[')
+            return read_vector(root);
+        if (c == ']')
+            return Cbracket;
         if (c == '.')
             return Dot;
         if (c == '\'')
@@ -460,6 +508,15 @@ static void print(Obj *obj) {
         break;
 
     case TINT   : printf("%lld", obj->value);
+        break;
+    case TVECTOR:
+        fputc('[', stdout);
+        for (long long i = 0; i < obj->len; i++) {
+            if (i > 0)
+                fputc(' ', stdout);
+            print(obj->elems[i]);
+        }
+        fputc(']', stdout);
         break;
     case TFLOAT: {
         char buf[NUM_STR_SIZE];
@@ -639,6 +696,7 @@ static inline Obj *eval_simple(Obj **env, Obj *obj) {
     switch (obj->type) {
     case TINT:
     case TFLOAT:
+    case TVECTOR:
     case TPRIMITIVE:
     case TFUNCTION:
     case TTRUE:
@@ -874,12 +932,15 @@ static Obj *prim_length(void *root, Obj **env, Obj **list) {
             if (car->type == TSTRING) {
                 len = strlen(car->name);
             }
+            else if (car->type == TVECTOR) {
+                len = (int)car->len;
+            }
             else if (car->type == TCELL) {
                 for (len = 0; car != Nil && car->type == TCELL; car = car->cdr) 
                     len++;
             }
             else {
-                error("When length has a single argument, it must be a list or a string", 
+                error("When length has a single argument, it must be a list, a string or a vector", 
                 (*list)->line_num);
             }
         }
@@ -1089,6 +1150,94 @@ static Obj *prim_integer_p(void *root, Obj **env, Obj **list) {
     if (length(args) != 1)
         error("integer? takes 1 argument", (*list)->line_num);
     return args->car->type == TINT ? True : Nil;
+}
+
+// Vectors
+
+// (vector expr ...) makes a vector of the values of the expressions
+static Obj *prim_vector(void *root, Obj **env, Obj **list) {
+    DEFINE2(root, args, v);
+    *args = eval_list(root, env, list);
+    *v = make_vector(root, length(*args), &Nil);
+    long long i = 0;
+    for (Obj *p = *args; p != Nil; p = p->cdr)
+        (*v)->elems[i++] = p->car;
+    return *v;
+}
+
+// (make-vector n [fill]) makes a vector of n elements, which are () unless fill is given
+static Obj *prim_make_vector(void *root, Obj **env, Obj **list) {
+    DEFINE2(root, args, fill);
+    *args = eval_list(root, env, list);
+    int argc = length(*args);
+    if (argc < 1 || argc > 2 || (*args)->car->type != TINT)
+        error("make-vector takes a length and an optional initial value", (*list)->line_num);
+    *fill = argc == 2 ? (*args)->cdr->car : Nil;
+    return make_vector(root, (*args)->car->value, fill);
+}
+
+// Checks that the arguments are a vector and an index which is in its range
+static Obj *vector_index(Obj *args, int argc, const char *name, int line_num, long long *index) {
+    if (length(args) != argc || args->car->type != TVECTOR || args->cdr->car->type != TINT)
+        error(argc == 3 ? "%s takes a vector, an index and a value" : "%s takes a vector and an index",
+              line_num, name);
+    *index = args->cdr->car->value;
+    if (*index < 0 || *index >= args->car->len)
+        error("%s: index %lld is out of range (the length is %lld)", line_num, name, *index,
+              args->car->len);
+    return args->car;
+}
+
+// (aref vector index)
+static Obj *prim_aref(void *root, Obj **env, Obj **list) {
+    Obj *args = eval_list(root, env, list);
+    long long i;
+    return vector_index(args, 2, "aref", (*list)->line_num, &i)->elems[i];
+}
+
+// (aset vector index value) stores the value in the vector, and returns it
+static Obj *prim_aset(void *root, Obj **env, Obj **list) {
+    Obj *args = eval_list(root, env, list);
+    long long i;
+    Obj *v = vector_index(args, 3, "aset", (*list)->line_num, &i);
+    return v->elems[i] = args->cdr->cdr->car;
+}
+
+// (vector? expr)
+static Obj *prim_vector_p(void *root, Obj **env, Obj **list) {
+    Obj *args = eval_list(root, env, list);
+    if (length(args) != 1)
+        error("vector? takes 1 argument", (*list)->line_num);
+    return args->car->type == TVECTOR ? True : Nil;
+}
+
+// (vector->list vector)
+static Obj *prim_vector_to_list(void *root, Obj **env, Obj **list) {
+    DEFINE3(root, args, result, item);
+    *args = eval_list(root, env, list);
+    if (length(*args) != 1 || (*args)->car->type != TVECTOR)
+        error("vector->list takes a vector", (*list)->line_num);
+    *result = Nil;
+    // Going backwards makes the list in the right order. The vector may move at every cons.
+    for (long long i = (*args)->car->len - 1; i >= 0; i--) {
+        *item = (*args)->car->elems[i];
+        *result = cons(root, item, result);
+    }
+    return *result;
+}
+
+// (list->vector list)
+static Obj *prim_list_to_vector(void *root, Obj **env, Obj **list) {
+    DEFINE3(root, args, v, lst);
+    *args = eval_list(root, env, list);
+    if (length(*args) != 1 || length((*args)->car) < 0)
+        error("list->vector takes a list", (*list)->line_num);
+    *lst = (*args)->car;
+    *v = make_vector(root, length(*lst), &Nil);
+    long long i = 0;
+    for (Obj *p = *lst; p != Nil; p = p->cdr)
+        (*v)->elems[i++] = p->car;
+    return *v;
 }
 
 // (not <cell>)
@@ -1473,6 +1622,13 @@ static void define_primitives(void *root, Obj **env) {
     add_primitive(root, env, "or", prim_or);
     add_primitive(root, env, "progn", prim_progn);
     add_primitive(root, env, "=", prim_num_eq);
+    add_primitive(root, env, "vector", prim_vector);
+    add_primitive(root, env, "make-vector", prim_make_vector);
+    add_primitive(root, env, "aref", prim_aref);
+    add_primitive(root, env, "aset", prim_aset);
+    add_primitive(root, env, "vector?", prim_vector_p);
+    add_primitive(root, env, "vector->list", prim_vector_to_list);
+    add_primitive(root, env, "list->vector", prim_list_to_vector);
     add_primitive(root, env, "float", prim_float);
     add_primitive(root, env, "truncate", prim_truncate);
     add_primitive(root, env, "floor", prim_floor);
@@ -1522,6 +1678,8 @@ int eval_input(void *root, Obj **env, Obj **expr) {
                 return 0;
             if (*expr == Cparen)
                 error("Stray close parenthesis", filepos.line_num);
+            if (*expr == Cbracket)
+                error("Stray close bracket", filepos.line_num);
             if (*expr == Dot)
                 error("Stray dot", filepos.line_num);
             print(eval(root, env, expr));

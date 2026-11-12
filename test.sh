@@ -263,3 +263,28 @@ run '= float' '()' '(= 1.5 2)'
 run eq t '(eq 1.5 1.5)'
 run eq '()' '(eq 1 1.0)'
 run eq '()' '(eq 1.5 2.5)'
+
+# Vectors
+run vector '[1 2 3]' '[1 2 3]'
+run vector '[]' '[]'
+run vector '[3 a 1.5 [4 5]]' '[(+ 1 2) "a" 1.5 [4 5]]'
+run vector '[1 2]' '(vector 1 (+ 1 1))'
+run vector '[0 0 0]' '(make-vector 3 0)'
+run vector '[() ()]' '(make-vector 2)'
+run vector '(1 2 3)' '(vector->list [1 2 3])'
+run vector '[a b c]' "(list->vector '(a b c))"
+run vector 3 '(length [1 2 3])'
+run vector 0 '(length [])'
+run vector t '(vector? [1])'
+run vector '()' "(vector? '(1))"
+run vector t '(atom [1])'
+run aref b "(aref ['a 'b 'c] 1)"
+run aref 3 '(aref [1 [2 3]] 1) (aref (aref [1 [2 3]] 1) 1)'
+run aset '[0 x 0]' "(define v (make-vector 3 0)) (aset v 1 'x) v"
+run aset 9 '(define v (vector 1 2)) (aset v 0 9)'
+run aset 9 '(define v (vector 1 2)) (aset v 0 9) (aref v 0)'
+run aset '[0 0 0]' '(defun f () [0 0 0]) (aset (f) 0 9) (f)'
+run eq t '(define v [1]) (eq v v)'
+run eq '()' '(eq [1] [1])'
+run vector 398 '(define n 200) (define v (make-vector n 1)) (define i 0) (while (< i n) (aset v i (* i 2)) (setq i (+ i 1))) (aref v (- n 1))'
+run vector '[(1 2) [3]]' "(vector '(1 2) [3])"

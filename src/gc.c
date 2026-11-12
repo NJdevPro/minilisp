@@ -199,6 +199,10 @@ bool gc_collect(void *root, size_t new_size) {
             if (scan1->bind)
                 scan1->bind = forward(scan1->bind);
             break;
+        case TVECTOR:
+            for (long long i = 0; i < scan1->len; i++)
+                scan1->elems[i] = forward(scan1->elems[i]);
+            break;
         case TCELL:
             scan1->car = forward(scan1->car);
             scan1->cdr = forward(scan1->cdr);

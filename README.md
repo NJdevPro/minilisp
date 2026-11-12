@@ -1,25 +1,34 @@
 MiniLisp with REPL
 ==================
 
-Foreword by N. Janin:
-This is my attempt at making Rui Ueyama (rui314)'s MiniLisp slightly more user friendly 
-and powerful.
-Not being limited by the 1000 lines challenge, I've added a number of basic primitives 
-to the original program, while trying to keep the goal of simplicity and conciseness.
+This is my attempt at making Rui Ueyama (rui314)'s MiniLisp more user friendly and powerful, while trying to keep the goal of simplicity and conciseness.
+Not being limited by the 1000 lines challenge, I've added a Read-Eval-Print-Loop (REPL) and a number of primitives to the original program to make it a comfortable Lisp implementation.
 
-The whole program compiles to less than 100 kb without debugging symbols and should be 
-able to run on low powered devices.
+The whole program is 2500 lines of C and compiles to around 120 kb without debugging symbols. It should be able to run on low powered devices.
 
-The added primitives:
-* strings and conversion
-* operators *, /, mod
-* predicates >, >=, <=, not,
-* special forms and, or,
-* functions list, atom, length, reverse, progn, print, println, load, exit, gensym.
+The original MiniLisp included the following:
+- integers, symbols, cons cells
+- global variables,
+- lexically-scoped local variables,
+- closures,
+- _if_ conditional,
+- primitive functions, such as +, =, <, or _list_,
+- user-defined functions,
+- a macro system,
+- and a copying garbage collector.
 
-This has the side effect of being much faster as well, since all these primitives are compiled instead of being interpreted.
+The added primitives of this version:
+- cons, car, cdr
+- strings and conversion
+- floats and operators on floats
+- vectors
+- operators *, /, mod
+- predicates >, >=, <=, not,
+- special forms and, or,
+- functions list, atom, length, reverse, progn, print, println, load, exit, gensym
+- tail call optimization
 
-Among the bells and whistles, I've added a Read-Eval-Print-Loop (REPL) based on Justine Tunney (jart)'s bestline.
+This added expressivity has the side effect of being much faster as well, since all these primitives are compiled C instead of being interpreted.
 
 In this version, instead of passing a file using pipes, you simply pass the files as command parameters :
 ./minilisp f1 f2 etc
@@ -45,6 +54,8 @@ The options, which can be given before or after the file names, are:
 
 When an expression fails, the error is reported on the standard error output
 as `file[line]: message` and the evaluation goes on with the next expression.
+
+The Read-Eval-Print-Loop (REPL) is based on Justine Tunney (jart)'s bestline.
 
 ## REPL Shortcuts
 
@@ -106,33 +117,11 @@ The REPL also saves the history of commands in the file history.txt
 This file is loaded at startup, so one can recall previous commands
 (unless the option -H is given).
 
-Known bugs:
+Known bugs and limitations:
 * recall of multiline commands does not work as expected.
 * a recursion which is not a tail call (such as `(+ 1 (f (- n 1)))`) uses the C stack:
   deeper than about 25000 calls it stops with the error "Stack overflow: the
   recursion is too deep".
-
-Original README (completed)
-===============
-
-One day I wanted to see what I can do with 1k lines of C and
-decided to write a Lisp interpreter. That turned to be a
-fun weekend project, and the outcome is a mini lisp implementation
-that supports
-
-- integers, symbols, cons cells
-- global variables,
-- lexically-scoped local variables,
-- closures,
-- _if_ conditional,
-- primitive functions, such as +, =, <, or _list_,
-- user-defined functions,
-- a macro system,
-- and a copying garbage collector.
-
-All those in 1000 lines of C. I didn't sacrifice readability for size.
-The code is in my opinion heavily commented to help the reader understand
-how all these features work.
 
 Compile
 -------
@@ -172,13 +161,15 @@ The above expression prints "3".
 
 ### Literals
 
-MiniLisp supports integer literals, float literals, string literals, `()`, `t`, symbols, and
+MiniLisp supports integer literals, float literals, string literals, vector literals, `()`, `t`, symbols, and
 list literals.
 
 * Integer literals are positive or negative 64 bit integers.
 * Float literals are double precision numbers. They have a fractional part, an
   exponent, or both: `1.5`, `-0.25`, `1e3`, `2.5E-4`. A digit is required on
   both sides of the point, so `1.` and `.5` are not floats.
+* Vector literals are written between square brackets: `[1 2 3]`. Contrary to the
+  list literals, their elements are evaluated (see Vectors below).
 * String literals are written between double quotes. The escape sequences `\n`,
   `\t`, `\r`, `\"` and `\\` are recognized.
 * `()` is the only false value. It also represents the empty list.
@@ -212,7 +203,8 @@ car.
     (setcar cell 'x)
     cell  ; -> (x . b)
 
-`length` and `reverse` operate either on their arguments, or a single list or a string.
+`length` and `reverse` operate either on their arguments, or a single list or a string
+(`length` also accepts a vector).
 `reverse` never modifies its arguments: it returns a new list or a new string.
 
     (length '(1 2 3))   ; -> 3
@@ -358,6 +350,44 @@ number and `log` of a number which is not positive are errors.
 
     (float? 1.5)      ; -> t
     (integer? 1.5)    ; -> ()
+
+### Vectors
+
+A vector is a fixed size sequence of values, whose elements are reached in
+constant time, unlike those of a list. The first element has the index 0.
+
+`[a b c]` is read as `(vector a b c)`. The elements are evaluated, and each
+evaluation makes a new vector, so a vector written in a function body is never
+shared between two calls. To have symbols or lists in a vector, quote them.
+
+    [1 (+ 1 1) "three"]    ; -> [1 2 three]
+    ['a '(b c)]            ; -> [a (b c)]
+    (vector 1 2)           ; -> [1 2]
+
+`(make-vector n)` makes a vector of `n` elements which are `()`, and
+`(make-vector n x)` one whose elements are all `x`.
+
+    (make-vector 3 0)      ; -> [0 0 0]
+
+`aref` reads an element, `aset` stores a value in the vector and returns it.
+An index out of range is an error.
+
+    (define v (make-vector 3 0))
+    (aset v 1 'x)          ; -> x
+    (aref v 1)             ; -> x
+    v                      ; -> [0 x 0]
+
+`length` returns the number of elements, `vector?` tells whether an object is a
+vector, and `vector->list` and `list->vector` convert between lists and vectors.
+
+    (length [1 2 3])       ; -> 3
+    (vector? [1])          ; -> t
+    (vector->list [1 2 3]) ; -> (1 2 3)
+    (list->vector '(a b))  ; -> [a b]
+
+Note that `'[a b]` is the list `(vector a b)`, not a vector of symbols: write
+`['a 'b]` or `(list->vector '(a b))`. Two vectors are `eq` only if they are the
+same object.
 
 ### Equivalence test operators
 

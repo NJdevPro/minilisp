@@ -1,12 +1,12 @@
 ;;
-;;  Sudoku solver
+;;  Sudoku solver, with vectors
 ;;
-;;  Backtracking search which always fills the empty cell that has the fewest
-;;  candidates (a cell with a single candidate is filled immediately, and a
-;;  cell with no candidate means a dead end). This is what makes hard puzzles
-;;  solvable in about a second.
+;;  The same algorithm as sudoku.lisp (backtracking which always fills the empty
+;;  cell that has the fewest candidates), but the grid and the sets of used digits
+;;  are vectors instead of lists: reading or writing a cell takes the same time
+;;  whatever its position, where a list has to be walked through.
 ;;
-;;  Run it with:  ./minilisp examples/sudoku.lisp
+;;  Run it with:  ./minilisp examples/sudoku2.lisp
 ;;
 ;;  The cells are numbered from 0 to 80, row by row. The digits already used in
 ;;  a row, a column or a box are kept as one integer, the sum of 2^(d-1) for
@@ -26,27 +26,26 @@
 (define boxes ())   ; ... in each 3x3 box
 (define nodes 0)    ; number of digits tried so far
 
-(define pow2 '(1 2 4 8 16 32 64 128 256))
+(define pow2 [1 2 4 8 16 32 64 128 256])
 
 (defun box-of (r c) (+ (* (/ r 3) 3) (/ c 3)))
 
-;; Adds delta to the nth element of lst
-(defun bump (lst n delta)
-  ((lambda (cell) (setcar cell (+ (car cell) delta)))
-   (nth-tail lst n)))
+;; Adds delta to the nth element of the vector vec
+(defun bump (vec n delta)
+  (aset vec n (+ (aref vec n) delta)))
 
 ;; Puts the digit d in the cell i, and updates the sets of used digits.
 ;; delta is 2^(d-1) to add the digit, and -2^(d-1) to remove it.
 (defun set-cell (i d delta)
   ((lambda (r c)
-     (setcar (nth-tail grid i) d)
+     (aset grid i d)
      (bump rows r delta)
      (bump cols c delta)
      (bump boxes (box-of r c) delta))
    (/ i 9) (mod i 9)))
 
-(defun place (i d)   (set-cell i d (nth pow2 (- d 1))))
-(defun unplace (i d) (set-cell i 0 (- (nth pow2 (- d 1)))))
+(defun place (i d)   (set-cell i d (aref pow2 (- d 1))))
+(defun unplace (i d) (set-cell i 0 (- (aref pow2 (- d 1)))))
 
 ;;; ------------------------------------------------------------------
 ;;; Candidates
@@ -69,26 +68,25 @@
 ;; The list of the digits which can be put in the cell i
 (defun cands-of (i)
   ((lambda (r c)
-     (cands (nth rows r) (nth cols c) (nth boxes (box-of r c)) 9 256 ()))
+     (cands (aref rows r) (aref cols c) (aref boxes (box-of r c)) 9 256 ()))
    (/ i 9) (mod i 9)))
 
-;; Looks for the empty cell with the fewest candidates among the cells,
-;; i being the index of the first one. Returns (index . candidates), or ()
-;; if there is no empty cell.
-(defun best (cells i best-i best-c best-n)
-  (if (eq () cells)
+;; Looks for the empty cell with the fewest candidates among the cells from i
+;; on. Returns (index . candidates), or () if there is no empty cell.
+(defun best (i best-i best-c best-n)
+  (if (= i 81)
       (if (< best-i 0) () (cons best-i best-c))
-      (if (= (car cells) 0)
+      (if (= (aref grid i) 0)
           ((lambda (c)
              ((lambda (n)
                 (if (< n best-n)
                     (if (<= n 1)
                         (cons i c)                ; no need to look further
-                        (best (cdr cells) (+ i 1) i c n))
-                    (best (cdr cells) (+ i 1) best-i best-c best-n)))
+                        (best (+ i 1) i c n))
+                    (best (+ i 1) best-i best-c best-n)))
               (length c)))
            (cands-of i))
-          (best (cdr cells) (+ i 1) best-i best-c best-n))))
+          (best (+ i 1) best-i best-c best-n))))
 
 ;;; ------------------------------------------------------------------
 ;;; Search
@@ -99,7 +97,7 @@
   ((lambda (b)
      (or (eq () b)
          (try (car b) (cdr b))))
-   (best grid 0 -1 () 10)))
+   (best 0 -1 () 10)))
 
 ;; Tries the candidates cs one after the other in the cell i
 (defun try (i cs)
@@ -117,36 +115,35 @@
 ;;; Input / output
 ;;; ------------------------------------------------------------------
 
-;; Puts the given digits of the cells in the grid
-(defun load-givens (cells i)
-  (if (eq () cells)
-      ()
+;; Puts the given digits of the vector givens in the grid
+(defun load-givens (givens i)
+  (if (< i 81)
       (progn
-        (or (= (car cells) 0) (place i (car cells)))
-        (load-givens (cdr cells) (+ i 1)))))
+        (or (= (aref givens i) 0) (place i (aref givens i)))
+        (load-givens givens (+ i 1)))))
 
 ;; puzzle is a list of 9 rows of 9 digits, 0 being an empty cell
 (defun init (puzzle)
-  (setq grid (make-list 81 0))
-  (setq rows (make-list 9 0))
-  (setq cols (make-list 9 0))
-  (setq boxes (make-list 9 0))
+  (setq grid (make-vector 81 0))
+  (setq rows (make-vector 9 0))
+  (setq cols (make-vector 9 0))
+  (setq boxes (make-vector 9 0))
   (setq nodes 0)
-  (load-givens (append-reduce puzzle) 0))
+  (load-givens (list->vector (append-reduce puzzle)) 0))
 
-;; The string of the n first cells, with a space between the groups of 3
-(defun row-str (cells n acc)
+;; The string of the n cells from the cell i on, with a space between the groups of 3
+(defun row-str (i n acc)
   (if (= n 0)
       acc
-      (row-str (cdr cells) (- n 1)
+      (row-str (+ i 1) (- n 1)
                (string-concat acc
-                              (if (= (car cells) 0) "." (car cells))
+                              (if (= (aref grid i) 0) "." (aref grid i))
                               (if (and (> n 1) (= (mod n 3) 1)) " " "")))))
 
 (defun show-rows (r)
   (if (< r 9)
       (progn
-        (println (row-str (nth-tail grid (* r 9)) 9 ""))
+        (println (row-str (* r 9) 9 ""))
         (if (and (< r 8) (= (mod r 3) 2)) (println "") ())
         (show-rows (+ r 1)))))
 

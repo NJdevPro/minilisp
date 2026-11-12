@@ -28,11 +28,13 @@ enum {
     TMOVED,
     TSTRING,
     TFLOAT,
+    TVECTOR,
     // Const objects. They are statically allocated and will never be managed by GC.
     TTRUE,
     TNIL,
     TDOT,
     TCPAREN,
+    TCBRACKET,
 };
 
 // Typedef for the primitive function
@@ -64,6 +66,12 @@ typedef struct Obj {
         struct {
             struct Obj *car;
             struct Obj *cdr;
+        };
+        // Vector: the number of elements, followed by the elements. The size of the object
+        // does not tell the length, since it is rounded up.
+        struct {
+            long long len;
+            struct Obj *elems[];
         };
         // Float
         double fvalue;
