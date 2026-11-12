@@ -2,29 +2,19 @@
 ;;  Simple library of useful functions and macros
 ;; 
 
-;; (and e1 e2 ...)
-;; => (if e1 (and e2 ...))
-;; (and e1)
-;; => e1
-(defmacro and (expr . rest)
-  (if rest
-      (list 'if expr (cons 'and rest)) 
-      expr))
+(defun cadr (x) (car (cdr x)))
+(defun cddr (x) (cdr (cdr x)))
+(defun caddr (x) (car (cdr (cdr x))))
 
-;; (or e1 e2 ...)
-;; => (let <tmp> e1
-;;      (if <tmp> <tmp> (or e2 ...)))
-;; (or e1)
-;; => e1
-;;
-;; The reason to use the temporary variables is to avoid evaluating the
-;; arguments more than once.
-(defmacro or (expr . rest)
-  (if rest
-      (let var (gensym)
-	    (list 'let var expr
-		  (list 'if var var (cons 'or rest))))
-    expr))
+(defun max (a b) (if (> a b) a b))
+(defun abs (n) (if (< n 0) (- n) n))
+(defun gcd (a b) (if (= b 0) (abs a) (gcd b (mod a b))))
+
+;; Is e the form (op ...) ?
+(defun op? (e op) (and (not (atom e)) (eq (car e) op)))
+
+(defun memq (x lst)
+  (and lst (or (eq x (car lst)) (memq x (cdr lst)))))
 
 ;; (let var val body ...)
 ;; => ((lambda (var) body ...) val)

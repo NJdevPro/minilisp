@@ -1506,6 +1506,13 @@ static Obj *prim_string_to_symbol(void *root, Obj **env, Obj **list) {
     return intern(root, name);
 }
 
+// (error <string | number> ...) reports an error whose message is made of the arguments, and
+// stops the evaluation like any other error.
+static Obj *prim_error(void *root, Obj **env, Obj **list) {
+    Obj *msg = prim_string_concat(root, env, list);
+    error("%s", (*list)->line_num, msg->name);
+}
+
 static Obj *prim_exit(void *root, Obj **env, Obj **list) {
     if (length(*list) != 1)
         error("exit accepts 1 argument", (*list)->line_num);
@@ -1649,6 +1656,7 @@ static void define_primitives(void *root, Obj **env) {
     add_primitive(root, env, "symbol->string", prim_symbol_to_string);
     add_primitive(root, env, "string->symbol", prim_string_to_symbol);
     add_primitive(root, env, "load", prim_load);
+    add_primitive(root, env, "error", prim_error);
     add_primitive(root, env, "exit", prim_exit);
 }
 

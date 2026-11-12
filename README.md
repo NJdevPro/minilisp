@@ -509,6 +509,11 @@ A relative path is first looked up in the directory of the file that calls `load
 then in the current directory. For instance, `(load "./library.lisp")` in
 examples/hanoi.lisp loads examples/library.lisp, wherever minilisp is started from.
 
+`error` stops the evaluation with an error message made of its arguments, which
+are strings or numbers, like those of `string-concat`.
+
+    (error "Unknown function " 42)   ; -> prints "Unknown function 42" as an error
+
 `exit` quits the interpreter and returns the integer passed as parameter.
 
     (exit 0) -> quit with success
