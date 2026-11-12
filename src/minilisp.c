@@ -525,6 +525,8 @@ static Obj *macroexpand(void *root, Obj **env, Obj **obj) {
 // The special forms which are evaluated by eval itself, in order to handle the tail calls.
 static Obj *prim_if(void *root, Obj **env, Obj **list);
 static Obj *prim_progn(void *root, Obj **env, Obj **list);
+static Obj *prim_and(void *root, Obj **env, Obj **list);
+static Obj *prim_or(void *root, Obj **env, Obj **list);
 
 // Evaluates the objects which are not function application forms. Returns NULL for a form.
 static inline Obj *eval_simple(Obj **env, Obj *obj) {
@@ -615,6 +617,25 @@ static Obj *eval_form(void *root, Obj **env, Obj **obj) {
         }
         if ((*fn)->fn == prim_progn)
             goto sequence;
+
+        if ((*fn)->fn == prim_and || (*fn)->fn == prim_or) {
+            // (and expr ...) and (or expr ...): all the expressions but the last one are evaluated
+            // until one of them decides the result. The last one is in tail position.
+            bool is_and = (*fn)->fn == prim_and;
+            if (*args == Nil)
+                return is_and ? True : Nil;
+            while ((*args)->type == TCELL && (*args)->cdr != Nil) {
+                *tmp = (*args)->car;
+                *tmp = eval(root, cenv, tmp);
+                if ((*tmp == Nil) == is_and)  // and: found a false value, or: found a true one
+                    return *tmp;
+                *args = (*args)->cdr;
+            }
+            if ((*args)->type != TCELL)
+                error("Improper list of expressions", (*args)->line_num);
+            *cur = (*args)->car;
+            continue;
+        }
 
         // The other primitives are not evaluating anything in tail position
         return (*fn)->fn(root, cenv, args);
@@ -1013,6 +1034,25 @@ static Obj *prim_if(void *root, Obj **env, Obj **list) {
     return *els == Nil ? Nil : progn(root, env, els);
 }
 
+// (and expr ...) returns the first false value, or the value of the last expression, or t if
+// there is no expression. The expressions after the first false one are not evaluated.
+// (or expr ...) returns the first true value, or () if there is none. eval_form evaluates the
+// last expression in tail position; these are the versions for the other callers.
+static Obj *and_or(void *root, Obj **env, Obj **list, bool is_and) {
+    DEFINE2(root, lp, tmp);
+    *tmp = is_and ? True : Nil;
+    for (*lp = *list; (*lp)->type == TCELL; *lp = (*lp)->cdr) {
+        *tmp = (*lp)->car;
+        *tmp = eval(root, env, tmp);
+        if ((*tmp == Nil) == is_and)
+            return *tmp;
+    }
+    return *tmp;
+}
+
+static Obj *prim_and(void *root, Obj **env, Obj **list) { return and_or(root, env, list, true); }
+static Obj *prim_or(void *root, Obj **env, Obj **list)  { return and_or(root, env, list, false); }
+
 // (eq expr expr)
 static Obj *prim_eq(void *root, Obj **env, Obj **list) {
     if (length(*list) != 2)
@@ -1216,6 +1256,8 @@ static void define_primitives(void *root, Obj **env) {
     add_primitive(root, env, "lambda", prim_lambda);
     add_primitive(root, env, "atom", prim_atom);
     add_primitive(root, env, "if", prim_if);
+    add_primitive(root, env, "and", prim_and);
+    add_primitive(root, env, "or", prim_or);
     add_primitive(root, env, "progn", prim_progn);
     add_primitive(root, env, "=", prim_num_eq);
     add_primitive(root, env, "eq", prim_eq);

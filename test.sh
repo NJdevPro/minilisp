@@ -207,5 +207,17 @@ run tailcall t '
   (even? 20000)'
 run tailcall 0 '(defun f (n) ((lambda (m) (if (= m 0) 0 (f (- m 1)))) n)) (f 20000)'
 
+# and, or
+run and t '(and)'
+run and 3 '(and 1 2 3)'
+run and '()' '(and 1 () 3)'
+run and '()' '(and () (car 1))'
+run or '()' '(or)'
+run or 2 '(or () 2 (car 1))'
+run or '()' '(or () ())'
+run or a "(or () 'a 'b)"
+run and 0 '(defun f (n) (and (> n -1) (if (= n 0) 0 (f (- n 1))))) (f 20000)'
+run or t '(defun f (n) (or (= n 0) (f (- n 1)))) (f 20000)'
+
 # Sum from 0 to 10
 run recursion 55 '(defun f (x) (if (= x 0) 0 (+ (f (+ x -1)) x))) (f 10)'

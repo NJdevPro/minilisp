@@ -14,6 +14,7 @@ The added primitives:
 * strings and conversion
 * operators *, /, mod
 * predicates >, >=, <=, not,
+* special forms and, or,
 * functions list, atom, length, reverse, progn, print, println, load, exit, gensym.
 
 This has the side effect of being much faster as well, since all these primitives are compiled instead of being interpreted.
@@ -276,6 +277,19 @@ The other numerical predicates `>`, `<=`, `>=` work in a similar fashion.
 evaluates *cond*. If the result is a true value, *then* is evaluated. Otherwise
 the *else* expressions are evaluated in sequence, and the value of the last one
 is returned (`()` if there is none).
+
+`(and expr ...)` evaluates its expressions from left to right and stops at the first
+one which is `()`, which is then the result. Otherwise the result is the value of the last
+expression. `(and)` is `t`.
+
+`(or expr ...)` evaluates its expressions from left to right and stops at the first
+one which is not `()`, which is then the result. If there is none the result is `()`.
+
+    (and 1 2 3)       ; -> 3
+    (and 1 () (car 1)) ; -> ()   the third expression is not evaluated
+    (or () 'a 'b)     ; -> a
+
+The last expression of `and` and `or` is in tail position.
 
 ### Loops
 
