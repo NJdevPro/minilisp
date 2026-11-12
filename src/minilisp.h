@@ -1,3 +1,5 @@
+// This software is under the MIT License.
+
 #ifndef _MINILISP_H_
 #define _MINILISP_H_
 

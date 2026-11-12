@@ -1,4 +1,4 @@
-// This software is in the public domain.
+// This software is under the MIT License.
 
 #include <assert.h>
 #include <ctype.h>

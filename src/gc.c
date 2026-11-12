@@ -1,3 +1,5 @@
+// This software is under the MIT License.
+
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>

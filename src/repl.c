@@ -1,3 +1,5 @@
+// This software is under the MIT License.
+
 #ifndef __COSMOPOLITAN__
 #include <stdio.h>
 #include <stdlib.h>
