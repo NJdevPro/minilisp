@@ -6,7 +6,7 @@
 ;;  are vectors instead of lists: reading or writing a cell takes the same time
 ;;  whatever its position, where a list has to be walked through.
 ;;
-;;  Run it with:  ./minilisp examples/sudoku2.lisp
+;;  Run it with:  ./minilisp examples/sudoku.lisp
 ;;
 ;;  The cells are numbered from 0 to 80, row by row. The digits already used in
 ;;  a row, a column or a box are kept as one integer, the sum of 2^(d-1) for

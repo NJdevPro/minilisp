@@ -2,6 +2,7 @@
 
 #include <assert.h>
 #include <ctype.h>
+#include <errno.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -1049,8 +1050,8 @@ static Obj *prim_mult(void *root, Obj **env, Obj **list)   { return arith(root, 
 static Obj *prim_div(void *root, Obj **env, Obj **list)    { return arith(root, env, list, '/'); }
 static Obj *prim_modulo(void *root, Obj **env, Obj **list) { return arith(root, env, list, '%'); }
 
-// (op <number> <number>)
-// Two integers are compared as integers, otherwise the comparison is done with floats.
+// (op <number> <number>) or (op <string> <string>)
+// Strings are compared by their bytes. Two integers are compared as integers, otherwise the comparison is done with floats.
 #define PRIM_COMPARISON_OP(PRIM_OP, OP)                             \
 static Obj *PRIM_OP(void *root, Obj **env, Obj **list) {            \
     Obj *args = eval_list(root, env, list);                         \
@@ -1058,8 +1059,10 @@ static Obj *PRIM_OP(void *root, Obj **env, Obj **list) {            \
         error(#OP " takes only 2 number", (*list)->line_num);       \
     Obj *x = args->car;                                             \
     Obj *y = args->cdr->car;                                        \
+    if (x->type == TSTRING && y->type == TSTRING)                   \
+        return strcmp(x->name, y->name) OP 0 ? True : Nil;          \
     if (!is_number(x) || !is_number(y))                             \
-        error(#OP " takes only 2 numbers", (*list)->line_num);      \
+        error(#OP " takes only 2 numbers or 2 strings", (*list)->line_num); \
     if (x->type == TINT && y->type == TINT)                         \
         return x->value OP y->value ? True : Nil;                   \
     return to_double(x) OP to_double(y) ? True : Nil;               \
@@ -1436,10 +1439,9 @@ static Obj *prim_eq(void *root, Obj **env, Obj **list) {
 }
 
 // String primitives
-// (string-concat <string | number> ...)
-static Obj *prim_string_concat(void *root, Obj **env, Obj **list) {
-    DEFINE1(root, args);
-    *args = eval_list(root, env, list);
+
+// Concatenates the strings and numbers of the list *args, which must be rooted.
+static Obj *concat_list(void *root, Obj **args, const char *name, int line_num) {
     char num[NUM_STR_SIZE];
 
     // First pass: calculate total length needed
@@ -1450,7 +1452,7 @@ static Obj *prim_string_concat(void *root, Obj **env, Obj **list) {
         else if (p->car->type == TSTRING)
             total_len += strlen(p->car->name);
         else
-            error("string-concat arguments must be strings or numbers", (*list)->line_num);
+            error("%s arguments must be strings or numbers", line_num, name);
     }
 
     // The result is written directly in the new string. alloc may move the arguments, which
@@ -1473,6 +1475,97 @@ static Obj *prim_string_concat(void *root, Obj **env, Obj **list) {
     }
     *out = '\0';
     return result;
+}
+
+// (string-concat <string | number> ...)
+static Obj *prim_string_concat(void *root, Obj **env, Obj **list) {
+    DEFINE1(root, args);
+    *args = eval_list(root, env, list);
+    return concat_list(root, args, "string-concat", (*list)->line_num);
+}
+
+// (list->string list) concatenates the strings and numbers of the list
+static Obj *prim_list_to_string(void *root, Obj **env, Obj **list) {
+    DEFINE2(root, args, lst);
+    *args = eval_list(root, env, list);
+    if (length(*args) != 1 || !is_list((*args)->car))
+        error("list->string takes a list", (*list)->line_num);
+    *lst = (*args)->car;
+    return concat_list(root, lst, "list->string", (*list)->line_num);
+}
+
+// (substring string start [end]) is the part of the string from the index start up to the
+// index end (excluded), or up to the end of the string.
+static Obj *prim_substring(void *root, Obj **env, Obj **list) {
+    DEFINE1(root, args);
+    *args = eval_list(root, env, list);
+    int argc = length(*args);
+    if (argc < 2 || argc > 3 || (*args)->car->type != TSTRING || (*args)->cdr->car->type != TINT ||
+        (argc == 3 && (*args)->cdr->cdr->car->type != TINT))
+        error("substring takes a string, a start index and an optional end index",
+              (*list)->line_num);
+    long long len = strlen((*args)->car->name);
+    long long start = (*args)->cdr->car->value;
+    long long end = argc == 3 ? (*args)->cdr->cdr->car->value : len;
+    if (start < 0 || end > len || start > end)
+        error("substring: the range %lld to %lld is out of the string (the length is %lld)",
+              (*list)->line_num, start, end, len);
+    Obj *result = alloc(root, TSTRING, end - start + 1);
+    result->line_num = filepos.line_num;
+    memcpy(result->name, (*args)->car->name + start, end - start);   // *args may have moved
+    result->name[end - start] = '\0';
+    return result;
+}
+
+// (string-ref string index) is the character at this index, as a string of length 1
+static Obj *prim_string_ref(void *root, Obj **env, Obj **list) {
+    Obj *args = eval_list(root, env, list);
+    if (length(args) != 2 || args->car->type != TSTRING || args->cdr->car->type != TINT)
+        error("string-ref takes a string and an index", (*list)->line_num);
+    long long len = strlen(args->car->name);
+    long long i = args->cdr->car->value;
+    if (i < 0 || i >= len)
+        error("string-ref: index %lld is out of range (the length is %lld)", (*list)->line_num,
+              i, len);
+    char str[2] = { args->car->name[i], '\0' };
+    return make_string(root, str);
+}
+
+// (string->number string) is the number written in the string, or () if it does not contain
+// exactly a number: an integer, or a float, with an optional sign.
+static Obj *prim_string_to_number(void *root, Obj **env, Obj **list) {
+    Obj *args = eval_list(root, env, list);
+    if (length(args) != 1 || args->car->type != TSTRING)
+        error("string->number takes a string", (*list)->line_num);
+    const char *s = args->car->name;
+    const char *p = s + (*s == '-' || *s == '+');
+    if (!isdigit((unsigned char)*p))
+        return Nil;
+    bool is_float = false;
+    while (isdigit((unsigned char)*p))
+        p++;
+    if (*p == '.' && isdigit((unsigned char)p[1])) {
+        is_float = true;
+        for (p++; isdigit((unsigned char)*p); p++)
+            ;
+    }
+    if (*p == 'e' || *p == 'E') {
+        const char *q = p + 1 + (p[1] == '-' || p[1] == '+');
+        if (!isdigit((unsigned char)*q))
+            return Nil;
+        is_float = true;
+        for (p = q; isdigit((unsigned char)*p); p++)
+            ;
+    }
+    if (*p != '\0')
+        return Nil;
+    errno = 0;
+    if (!is_float) {
+        long long v = strtoll(s, NULL, 10);
+        return errno == ERANGE ? Nil : make_int(root, v);
+    }
+    double v = strtod(s, NULL);
+    return isinf(v) ? Nil : make_float(root, v);
 }
 
 static Obj *prim_symbol_to_string(void *root, Obj **env, Obj **list) {
@@ -1511,6 +1604,136 @@ static Obj *prim_string_to_symbol(void *root, Obj **env, Obj **list) {
 static Obj *prim_error(void *root, Obj **env, Obj **list) {
     Obj *msg = prim_string_concat(root, env, list);
     error("%s", (*list)->line_num, msg->name);
+}
+
+// Input and output
+
+static int script_argc = 0;
+static char **script_argv = NULL;
+
+// Sets the arguments of the command line which are given to the Lisp program (see args).
+void set_script_args(int argc, char **argv) {
+    script_argc = argc;
+    script_argv = argv;
+}
+
+// (args) is the list of the arguments which follow -- on the command line, as strings
+static Obj *prim_args(void *root, Obj **env, Obj **list) {
+    if (length(*list) != 0)
+        error("args takes no argument", (*list)->line_num);
+    DEFINE2(root, result, str);
+    *result = Nil;
+    for (int i = script_argc - 1; i >= 0; i--) {
+        *str = make_string(root, script_argv[i]);
+        *result = cons(root, str, result);
+    }
+    return *result;
+}
+
+// (read-line) reads a line of the standard input, without its end of line. It returns () at
+// the end of the input.
+static Obj *prim_read_line(void *root, Obj **env, Obj **list) {
+    if (length(*list) != 0)
+        error("read-line takes no argument", (*list)->line_num);
+    fflush(stdout);   // so that a prompt which was just printed is seen
+    char *line = NULL;
+    size_t cap = 0;
+    ssize_t n = getline(&line, &cap, stdin);
+    if (n < 0) {
+        free(line);
+        return Nil;
+    }
+    if (n > 0 && line[n - 1] == '\n')
+        line[--n] = '\0';
+    if (n > 0 && line[n - 1] == '\r')
+        line[--n] = '\0';
+    // make_string may run the GC, which only moves objects of the Lisp heap
+    Obj *result = make_string(root, line);
+    free(line);
+    return result;
+}
+
+// Evaluates the arguments of a primitive which takes a file name, and more strings
+static Obj *file_args(void *root, Obj **env, Obj **list, const char *name, int argc) {
+    Obj *args = eval_list(root, env, list);
+    bool ok = length(args) == argc;
+    for (Obj *p = args; ok && p != Nil; p = p->cdr)
+        ok = p->car->type == TSTRING;
+    if (!ok)
+        error(argc == 1 ? "%s takes a file name" : "%s takes a file name and a string",
+              (*list)->line_num, name);
+    return args;
+}
+
+// (read-file name) is the content of the file, as a string
+static Obj *prim_read_file(void *root, Obj **env, Obj **list) {
+    Obj *args = file_args(root, env, list, "read-file", 1);
+    const char *name = args->car->name;
+    FILE *f = fopen(name, "rb");
+    if (!f)
+        error("read-file: cannot open %s: %s", (*list)->line_num, name, strerror(errno));
+    char *buf = NULL;
+    size_t len = 0, cap = 0;
+    for (;;) {
+        if (len + 4096 > cap) {
+            cap = cap ? cap * 2 : 8192;
+            char *nbuf = realloc(buf, cap);
+            if (!nbuf) {
+                free(buf);
+                fclose(f);
+                error("read-file: out of memory", (*list)->line_num);
+            }
+            buf = nbuf;
+        }
+        size_t n = fread(buf + len, 1, cap - len - 1, f);
+        if (n == 0)
+            break;
+        len += n;
+    }
+    bool failed = ferror(f);
+    fclose(f);
+    if (failed) {
+        free(buf);
+        error("read-file: cannot read %s", (*list)->line_num, name);
+    }
+    buf[len] = '\0';
+    // The content is copied into the heap: the string stops at the first null character.
+    // alloc may run the GC, but it does not affect the buffer
+    Obj *result = make_string(root, buf);
+    free(buf);
+    return result;
+}
+
+// Writes the string in the file, which is opened with the given mode
+static Obj *write_to_file(void *root, Obj **env, Obj **list, const char *name, const char *mode) {
+    Obj *args = file_args(root, env, list, name, 2);
+    FILE *f = fopen(args->car->name, mode);
+    if (!f)
+        error("%s: cannot open %s: %s", (*list)->line_num, name, args->car->name,
+              strerror(errno));
+    const char *text = args->cdr->car->name;
+    size_t len = strlen(text);
+    bool ok = fwrite(text, 1, len, f) == len;
+    ok = fclose(f) == 0 && ok;
+    if (!ok)
+        error("%s: cannot write %s", (*list)->line_num, name, args->car->name);
+    return True;
+}
+
+// (write-file name string) replaces the content of the file with the string
+static Obj *prim_write_file(void *root, Obj **env, Obj **list) {
+    return write_to_file(root, env, list, "write-file", "wb");
+}
+
+// (append-file name string) adds the string at the end of the file
+static Obj *prim_append_file(void *root, Obj **env, Obj **list) {
+    return write_to_file(root, env, list, "append-file", "ab");
+}
+
+// (file-exists? name)
+static Obj *prim_file_exists(void *root, Obj **env, Obj **list) {
+    Obj *args = file_args(root, env, list, "file-exists?", 1);
+    return access(args->car->name, F_OK) == 0 ? True : Nil;
 }
 
 static Obj *prim_exit(void *root, Obj **env, Obj **list) {
@@ -1653,11 +1876,21 @@ static void define_primitives(void *root, Obj **env) {
     add_primitive(root, env, "print", prim_print);
     add_primitive(root, env, "println", prim_println);
     add_primitive(root, env, "string-concat", prim_string_concat);
+    add_primitive(root, env, "list->string", prim_list_to_string);
+    add_primitive(root, env, "substring", prim_substring);
+    add_primitive(root, env, "string-ref", prim_string_ref);
+    add_primitive(root, env, "string->number", prim_string_to_number);
     add_primitive(root, env, "symbol->string", prim_symbol_to_string);
     add_primitive(root, env, "string->symbol", prim_string_to_symbol);
     add_primitive(root, env, "load", prim_load);
     add_primitive(root, env, "error", prim_error);
     add_primitive(root, env, "exit", prim_exit);
+    add_primitive(root, env, "args", prim_args);
+    add_primitive(root, env, "read-line", prim_read_line);
+    add_primitive(root, env, "read-file", prim_read_file);
+    add_primitive(root, env, "write-file", prim_write_file);
+    add_primitive(root, env, "append-file", prim_append_file);
+    add_primitive(root, env, "file-exists?", prim_file_exists);
 }
 
 //======================================================================

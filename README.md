@@ -4,7 +4,7 @@ MiniLisp with REPL
 This is my attempt at making Rui Ueyama (rui314)'s MiniLisp more user friendly and powerful, while trying to keep the goal of simplicity and conciseness.
 Not being limited by the 1000 lines challenge, I've added a Read-Eval-Print-Loop (REPL) and a number of primitives to the original program to make it a comfortable Lisp implementation.
 
-The whole program is 2500 lines of C and compiles to around 120 kb without debugging symbols. It should be able to run on low powered devices.
+The whole program is 3000 lines of C and compiles to around 130 kb without debugging symbols. It should be able to run on low powered devices.
 
 The original MiniLisp included the following:
 - integers, symbols, cons cells
@@ -19,13 +19,14 @@ The original MiniLisp included the following:
 
 The added primitives of this version:
 - cons, car, cdr
-- strings and conversion
+- strings, substrings, string comparisons and conversions
 - floats and operators on floats
 - vectors
 - operators *, /, mod
 - predicates >, >=, <=, not,
 - special forms and, or,
 - functions list, atom, length, reverse, progn, print, println, load, exit, gensym
+- input and output: read-line, read-file, write-file, append-file, file-exists?, args
 - tail call optimization
 
 This added expressivity has the side effect of being much faster as well, since all these primitives are compiled C instead of being interpreted.
@@ -53,6 +54,9 @@ The options, which can be given before or after the file names, are:
 -M, --max-heap KB maximum size of the heap, in KB (default 1048576)
 -h, --help        print the help and exit
 ```
+
+What follows `--` on the command line is not read by minilisp: the Lisp program
+gets it with `(args)`.
 
 When an expression fails, the error is reported on the standard error output
 as `file[line]: message` and the evaluation goes on with the next expression.
@@ -445,6 +449,50 @@ are actually different are considered to not be the same by `eq`.
 
     (string->symbol "hello")   ; -> hello
 
+`<`, `<=`, `>` and `>=` (and `=`) also compare two strings, byte by byte.
+
+    (< "abc" "abd")         ; -> t
+
+A character is a string of length 1. Strings are made of bytes: MiniLisp
+knows nothing about UTF-8, so `length` counts bytes and `substring` may cut a
+multibyte character in two. `length` gives the length of a string.
+
+`substring` returns the part of a string from the index `start` up to the index
+`end` (excluded), or up to the end of the string when `end` is omitted. The
+first index is 0. It is an error if the range is not inside the string.
+
+    (substring "hello" 1 3)   ; -> "el"
+    (substring "hello" 2)     ; -> "llo"
+
+`string-ref` returns the character at an index, as a string of length 1.
+
+    (string-ref "hello" 1)    ; -> "e"
+
+`string->number` returns the integer or the float which is written in a string
+(with an optional sign), or `()` if the string is anything else.
+
+    (string->number "42")     ; -> 42
+    (string->number "-1.5e3") ; -> -1500.0
+    (string->number "4x")     ; -> ()
+
+`list->string` concatenates the strings and numbers of a list, like
+`string-concat` does with its arguments. Building a long string by collecting
+its parts in a list and calling `list->string` once is much faster than
+calling `string-concat` for each part, because every call copies the whole
+string.
+
+    (list->string (list "a" "b" 1))   ; -> "ab1"
+
+The file `examples/library.lisp` defines more functions, written in Lisp on top
+of these ones: `number->string`, `string->list`, `string-search`,
+`string-prefix?`, `string-suffix?`, `string-split`, `string-join` and
+`string-trim`.
+
+    (string-search "lo" "hello" 0)       ; -> 3 (the index, or () if not found)
+    (string-split "a,b,c" ",")           ; -> ("a" "b" "c")
+    (string-join (list "a" "b") ", ")    ; -> "a, b"
+    (string-trim "  hi \n")              ; -> "hi"
+
 ### Output operators
 
 `print` prints its arguments to the standard output, separated by a space.
@@ -456,6 +504,43 @@ Strings are printed without the quotes.
 
 `println` does the same, adding a return at the end. Without argument, it only
 prints a return.
+
+### Input operators and files
+
+`read-line` reads a line of the standard input and returns it as a string,
+without its end of line. It returns `()` at the end of the input, so that an
+empty line (`""`) can be told from the end. The standard output is flushed
+first, so that a prompt printed just before is displayed.
+
+    (define line (read-line))
+    (while line
+      (println "got: " line)
+      (setq line (read-line)))
+
+`read-file` returns the whole content of a file as a string. `write-file`
+replaces the content of a file (it creates it if needed) with a string, and
+`append-file` adds a string at its end. Both return `t`. It is an error if the
+file cannot be opened.
+
+    (write-file "notes.txt" "one\n")   ; -> t
+    (append-file "notes.txt" "two\n")  ; -> t
+    (read-file "notes.txt")            ; -> "one\ntwo\n"
+
+`file-exists?` tells whether a file exists. All the file names are relative to
+the current directory (unlike `load`).
+
+    (file-exists? "notes.txt")         ; -> t
+
+Strings stop at the first null character, so a file which contains one is read
+up to it.
+
+`args` returns the list of the arguments of the command line which follow `--`,
+as strings. It is `()` when there are none.
+
+    $ ./minilisp -r script.lisp -- 12 hello
+    ;; in script.lisp: (args) -> ("12" "hello")
+
+To read a number: `(string->number (car (args)))`.
 
 ### Definitions
 

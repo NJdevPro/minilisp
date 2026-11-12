@@ -143,12 +143,112 @@ run args 15 '(defun f (x y z) (+ x y z)) (f 3 5 7)'
 run restargs '(3 5 7)' '(defun f (x . y) (cons x y)) (f 3 5 7)'
 run restargs '(3)'    '(defun f (x . y) (cons x y)) (f 3)'
 
+# check_heap NAME EXPECTED OPTIONS CODE: the last line of the output must be EXPECTED.
+function check_heap() {
+  echo -n "Testing $1 ... "
+  for gc in "" 1; do
+    result=$(MINILISP_ALWAYS_GC=$gc ./minilisp $3 -r -H -x "$4" </dev/null 2>&1 | sed 's/Command history disengaged.//' | grep -v '^$' | tail -1)
+    if [ "$result" != "$2" ]; then
+      echo FAILED
+      fail "$2 expected, but got $result"
+    fi
+  done
+  echo ok
+}
+
+# check_io NAME EXPECTED STDIN CODE [ARG ...]: runs the code with the text STDIN (given to
+# printf) as standard input and the ARGs after --, and checks the last line of the output.
+function check_io() {
+  echo -n "Testing $1 ... "
+  for gc in "" 1; do
+    result=$(printf "$3" | MINILISP_ALWAYS_GC=$gc ./minilisp -r -H -x "$4" -- "${@:5}" 2>&1 | sed 's/Command history disengaged.//' | grep -v '^$' | tail -1)
+    if [ "$result" != "$2" ]; then
+      echo FAILED
+      fail "$2 expected, but got $result"
+    fi
+  done
+  echo ok
+}
+
 # strings
 run 'string-concat' 'one & two and 3' '(string-concat "one" " & " "two" " and " 3)'
 run 'symbol->string' 'twelve' "
   (define twelve 12)
   (symbol->string 'twelve)"
 run 'string->symbol' 'twelve' '(string->symbol "twelve")'
+run 'substring' 'el' '(substring "hello" 1 3)'
+run 'substring to the end' 'llo' '(substring "hello" 2)'
+run 'substring empty' '' '(substring "hello" 5)'
+run 'substring whole' 'hello' '(substring "hello" 0 5)'
+run 'string-ref' 'o' '(string-ref "hello" 4)'
+run 'list->string' 'a1b' '(list->string (list "a" 1 "b"))'
+run 'list->string empty' '' '(list->string ())'
+run 'string->number int' 42 '(string->number "42")'
+run 'string->number negative' -7 '(string->number "-7")'
+run 'string->number plus' 7 '(string->number "+7")'
+run 'string->number float' -350.0 '(string->number "-3.5e2")'
+run 'string->number not a number' '()' '(string->number "4x")'
+run 'string->number empty' '()' '(string->number "")'
+run 'string->number dot' '()' '(string->number "1.")'
+run 'string->number sign only' '()' '(string->number "-")'
+run 'string->number too large' '()' '(string->number "99999999999999999999")'
+run 'string <' t '(< "abc" "abd")'
+run 'string <' '()' '(< "b" "a")'
+run 'string >=' t '(>= "b" "b")'
+run 'string = ' t '(= "x" "x")'
+run 'string gc' 200 '
+  (define s "")
+  (define i 0)
+  (while (< i 200) (setq s (string-concat s (substring "xyz" 1 2))) (setq i (+ i 1)))
+  (length s)'
+check_heap 'substring range' '[1]: substring: the range 2 to 9 is out of the string (the length is 5)' '' '(substring "hello" 2 9)'
+check_heap 'substring reversed' '[1]: substring: the range 3 to 2 is out of the string (the length is 5)' '' '(substring "hello" 3 2)'
+check_heap 'string-ref range' '[1]: string-ref: index 5 is out of range (the length is 5)' '' '(string-ref "hello" 5)'
+check_heap 'string compare mixed' '[1]: < takes only 2 numbers or 2 strings' '' '(< "a" 1)'
+
+# String functions of the library
+LIB='(load "examples/library.lisp") '
+run 'string->list' '(a b c)' "$LIB"'(string->list "abc")'
+run 'string-search' 3 "$LIB"'(string-search "lo" "hello" 3)'
+run 'string-search none' '()' "$LIB"'(string-search "zz" "hello" 0)'
+run 'string-split' '(a b  c)' "$LIB"'(string-split "a,b,,c" ",")'
+run 'string-split long sep' '(a b c)' "$LIB"'(string-split "a--b--c" "--")'
+run 'string-split none' '(abc)' "$LIB"'(string-split "abc" ",")'
+run 'string-join' 'x, y, z' "$LIB"'(string-join (list "x" "y" "z") ", ")'
+run 'string-join empty' '' "$LIB"'(string-join () ", ")'
+run 'string-trim' 'hi there' "$LIB"'(string-trim "  hi there \n")'
+run 'string-trim blank' '' "$LIB"'(string-trim "   ")'
+run 'string-prefix?' t "$LIB"'(string-prefix? "he" "hello")'
+run 'string-suffix?' '()' "$LIB"'(string-suffix? "hello!" "hello")'
+run 'number->string' 3.5 "$LIB"'(number->string 3.5)'
+
+# Input and output
+TMPF=$(mktemp)
+trap 'rm -f "$TMPF"' EXIT
+check_io 'args' '(a b c)' '' '(args)' a 'b c'
+check_io 'args count' 2 '' '(length (args))' a 'b c'
+check_io 'args none' '()' '' '(args)'
+check_io 'read-line' abc 'abc\ndef\n' '(read-line)'
+check_io 'read-line twice' def 'abc\ndef\n' '(read-line) (read-line)'
+check_io 'read-line eof' '()' 'abc\n' '(read-line) (read-line)'
+check_io 'read-line no end of line' 'last' 'last' '(read-line)'
+check_io 'read-line empty line' 0 '\n' '(length (read-line))'
+check_io 'read-line crlf' 2 'ab\r\n' '(length (read-line))'
+check_io 'read-line loop' 3 'a\nb\nc\n' '
+  (define n 0)
+  (while (read-line) (setq n (+ n 1)))
+  n'
+check_io 'write-file, read-file' 'hello' '' "(write-file \"$TMPF\" \"hello\") (read-file \"$TMPF\")"
+check_io 'write-file replaces' 'new' '' "(write-file \"$TMPF\" \"old content\") (write-file \"$TMPF\" \"new\") (read-file \"$TMPF\")"
+check_io 'append-file' 7 '' "(write-file \"$TMPF\" \"hello\\n\") (append-file \"$TMPF\" \"x\") (length (read-file \"$TMPF\"))"
+check_io 'read-file empty' 0 '' "(write-file \"$TMPF\" \"\") (length (read-file \"$TMPF\"))"
+check_io 'read-file large' 20000 '' "(define s \"0123456789\") (write-file \"$TMPF\" (string-concat s s)) (define i 0) (while (< i 999) (append-file \"$TMPF\" (string-concat s s)) (setq i (+ i 1))) (length (read-file \"$TMPF\"))"
+check_io 'file-exists?' t '' "(file-exists? \"$TMPF\")"
+check_io 'file-exists? not' '()' '' '(file-exists? "/nonexistent/file")'
+check_io 'read-file missing' '[1]: read-file: cannot open /nonexistent/file: No such file or directory' '' '(read-file "/nonexistent/file")'
+check_io 'write-file bad dir' '[1]: write-file: cannot open /nonexistent/file: No such file or directory' '' '(write-file "/nonexistent/file" "x")'
+check_io 'read-file bad argument' '[1]: read-file takes a file name' '' '(read-file 1)'
+check_io 'write-file bad argument' '[1]: write-file takes a file name and a string' '' '(write-file "f")'
 
 # Lexical closures
 run closure 3 '(defun call (f) ((lambda (var) (f)) 5))
@@ -290,19 +390,6 @@ run vector 398 '(define n 200) (define v (make-vector n 1)) (define i 0) (while 
 run vector '[(1 2) [3]]' "(vector '(1 2) [3])"
 
 # Size of the heap: -m is the initial size and -M the maximum, in KB.
-# check_heap NAME EXPECTED OPTIONS CODE: the last line of the output must be EXPECTED.
-function check_heap() {
-  echo -n "Testing $1 ... "
-  for gc in "" 1; do
-    result=$(MINILISP_ALWAYS_GC=$gc ./minilisp $3 -r -H -x "$4" </dev/null 2>&1 | sed 's/Command history disengaged.//' | grep -v '^$' | tail -1)
-    if [ "$result" != "$2" ]; then
-      echo FAILED
-      fail "$2 expected, but got $result"
-    fi
-  done
-  echo ok
-}
-
 check_heap 'heap fixed' 3 '-m 32 -M 32' '(length (list 1 2 3))'
 check_heap 'heap garbage' 50000 '-m 32 -M 32' '(define i 0) (while (< i 50000) (setq i (+ i 1))) i'
 check_heap 'heap exhausted' '[1]: Memory exhausted' '-m 32 -M 32' '(make-vector 5000 0)'

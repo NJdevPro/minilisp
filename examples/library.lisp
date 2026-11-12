@@ -130,3 +130,84 @@
               (cons pivot ())
               (quicksort (filter (lambda(x) (>= x pivot)) (cdr lst)))) ))))
             
+
+;;;
+;;; String operators
+;;;
+;;; A character is a string of length 1, as returned by string-ref. The primitives are
+;;; length, substring, string-ref, string-concat, list->string, string->number and the
+;;; comparisons (eq and < <= > >= work on strings): the operators below are built on them.
+;;; Strings are made of bytes: these functions know nothing about UTF-8.
+;;;
+
+;; The string of the number n
+(defun number->string (n) (string-concat n))
+
+;; The list of the characters of s
+(defun string->list (s) (%string->list s (- (length s) 1) ()))
+
+(defun %string->list (s i acc)
+  (if (< i 0)
+      acc
+      (%string->list s (- i 1) (cons (string-ref s i) acc))))
+
+;; The index of the first occurrence of the string needle in s, at the index start or
+;; after it, or () if there is none.
+(defun string-search (needle s start)
+  (%string-search needle s start (length needle) (- (length s) (length needle))))
+
+(defun %string-search (needle s i n last)
+  (if (> i last)
+      ()
+      (if (eq (substring s i (+ i n)) needle)
+          i
+          (%string-search needle s (+ i 1) n last))))
+
+;; Does the string s start (or end) with the string affix?
+(defun string-prefix? (affix s)
+  (and (<= (length affix) (length s))
+       (eq (substring s 0 (length affix)) affix)))
+
+(defun string-suffix? (affix s)
+  (and (<= (length affix) (length s))
+       (eq (substring s (- (length s) (length affix))) affix)))
+
+;; The list of the parts of s which are separated by the string sep: "a,b" -> ("a" "b")
+(defun string-split (s sep)
+  (if (= (length sep) 0)
+      (error "string-split: the separator is empty")
+      (%string-split s sep (length sep) 0 ())))
+
+(defun %string-split (s sep n start acc)
+  (let i (string-search sep s start)
+    (if i
+        (%string-split s sep n (+ i n) (cons (substring s start i) acc))
+        (reverse (cons (substring s start) acc)))))
+
+;; Concatenates the strings of the list lst, with the string sep between them.
+(defun string-join (lst sep) (list->string (%interleave lst sep ())))
+
+(defun %interleave (lst sep acc)
+  (if (eq () lst)
+      (reverse acc)
+      (%interleave (cdr lst) sep
+                   (if acc
+                       (cons (car lst) (cons sep acc))
+                       (cons (car lst) acc)))))
+
+;; Removes the spaces, tabs and new lines at both ends of s
+(defun string-trim (s)
+  (let i (%skip-left s 0)
+    (substring s i (%skip-right s (length s) i))))
+
+(defun %space? (c) (or (eq c " ") (eq c "\t") (eq c "\n") (eq c "\r")))
+
+(defun %skip-left (s i)
+  (if (and (< i (length s)) (%space? (string-ref s i)))
+      (%skip-left s (+ i 1))
+      i))
+
+(defun %skip-right (s j start)
+  (if (and (> j start) (%space? (string-ref s (- j 1))))
+      (%skip-right s (- j 1) start)
+      j))

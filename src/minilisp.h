@@ -118,6 +118,7 @@ typedef struct {
 void error(const char *fmt, int line_num, ...) __attribute__((noreturn, format(printf, 1, 3)));
 
 void init_minilisp(Obj **env);
+void set_script_args(int argc, char **argv);
 
 // Sets the text the reader will consume. The text must stay valid until it is fully evaluated.
 void set_input(const char *text, size_t len);

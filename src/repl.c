@@ -130,6 +130,15 @@ static size_t parse_size(const char *arg, const char *what) {
 void parse_args(int argc, char **argv) {
     size_t heap_kb = 0, max_heap_kb = 0;   // 0 when not given
 
+    // What follows -- is not for minilisp: it is given to the Lisp program, see (args)
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--") == 0) {
+            set_script_args(argc - i - 1, argv + i + 1);
+            argc = i;
+            break;
+        }
+    }
+
     static ko_longopt_t long_options[] = {
         {"exec",        ko_required_argument,   300 }, // exec Lisp code
         {"no-history",  ko_no_argument,         301 }, // disable history
@@ -198,7 +207,7 @@ void parse_args(int argc, char **argv) {
 
             case 'h':
             case 303: // --help
-                puts("minilisp [-r -x -m -M -h] FILE1 FILE2 ...\n");
+                puts("minilisp [-r -x -m -M -h] FILE1 FILE2 ... [-- ARG1 ARG2 ...]\n");
                 puts("Run the Lisp files FILE1, FILE2, ... in that order,");
                 puts("and enter the read-eval-print loop once finished.");
                 puts("-r | --no-repl    : don't enter the read-eval-print loop.");
@@ -208,6 +217,7 @@ void parse_args(int argc, char **argv) {
                 puts("                    (default 1048576). -m and -M together with the same value");
                 puts("                    give a heap of fixed size. The memory used is twice the heap.");
                 puts("-h | --help       : print this help.");
+        puts("ARG1 ARG2 ... after -- are given to the Lisp program: see (args).");
                 exit(0);
 
             case '?': // unknown option
