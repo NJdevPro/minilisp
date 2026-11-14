@@ -23,16 +23,42 @@ The added primitives of this version:
 - floats and operators on floats
 - vectors
 - operators *, /, mod
-- predicates >, >=, <=, not,
-- special forms and, or,
+- predicates >, >=, <=,
+- special forms and, or, not,
 - functions list, atom, length, reverse, progn, print, println, load, exit, gensym
 - input and output: read-line, read-file, write-file, append-file, file-exists?, args
 - tail call optimization
 
 This added expressivity has the side effect of being much faster as well, since all these primitives are compiled C instead of being interpreted.
 
-In this version, instead of passing a file using pipes, you simply pass the files as command parameters :
-./minilisp f1 f2 etc
+Compile
+-------
+
+    $ make
+
+MiniLisp has been tested on Linux x86/x86-64 and 64 bit Mac OS. The code is not
+very architecture dependent, so you should be able to compile and run on other
+Unix-like operating systems.
+
+Test
+----
+
+MiniLisp comes with a comprehensive test suite. In order to run the tests, give
+"test" argument to make.
+
+    $ make test
+
+The tests run twice, the second time with the environment variable
+`MINILISP_ALWAYS_GC=1`, which makes the garbage collector run at every memory
+allocation and makes the old heap inaccessible, so that any stale pointer
+crashes immediately. `MINILISP_DEBUG_GC=1` prints a line on the standard error
+output at each collection. The heap starts at 4 MB (per semi-space) and doubles
+when more than half of it is still in use after a collection, up to 1 GB.
+
+## Program arguments
+
+Pass the source files f1, f2, ... as command arguments :
+./minilisp f1 f2 ...
 
 The files all share the same environment, so all the symbols, functions and macros defined 
 in f1 can be reused in the following files. The REPL is started after execution, unless we pass the option
@@ -61,9 +87,30 @@ gets it with `(args)`.
 When an expression fails, the error is reported on the standard error output
 as `file[line]: message` and the evaluation goes on with the next expression.
 
-The Read-Eval-Print-Loop (REPL) is based on Justine Tunney (jart)'s bestline.
+Size of the heap
+----------------
+
+The options `-m` (`--heap`) and `-M` (`--max-heap`) set the initial and the maximum
+size of the heap, in KB. The minimum is 32 KB, which is enough to start the
+interpreter and to load `examples/library.lisp`; a non tail recursion 1000 calls
+deep needs about 100 KB. This makes MiniLisp usable on small machines, such as a
+Raspberry Pi with little memory, and is a way to test the garbage collector with
+a tiny heap.
+
+    ./minilisp -m 256 -M 256 prog.lisp   # a heap of fixed size: 256 KB
+    ./minilisp -m 64 prog.lisp           # starts with 64 KB, may grow up to 1 GB
+    ./minilisp -M 1024 prog.lisp         # a heap of 1 MB at most (it starts with 1 MB)
+
+The collector copies the live objects from a semi-space to the other one, so the
+memory used is twice the size of the heap (and up to four times during a growth).
+A heap which cannot grow, because it has reached its maximum, ends with the error
+"Memory exhausted" when the live data do not fit anymore. `-m` alone does not limit the
+growth, `-M` does. If only `-M` is given, the heap starts at 4 MB or at the
+maximum if that is smaller.
 
 ## REPL Shortcuts
+
+The Read-Eval-Print-Loop (REPL) is based on Justine Tunney (jart)'s bestline.
 
 ```
 CTRL-Enter     CONTINUE ON NEXT LINE
@@ -128,51 +175,6 @@ Known bugs and limitations:
 * a recursion which is not a tail call (such as `(+ 1 (f (- n 1)))`) uses the C stack:
   deeper than about 25000 calls it stops with the error "Stack overflow: the
   recursion is too deep".
-
-Compile
--------
-
-    $ make
-
-MiniLisp has been tested on Linux x86/x86-64 and 64 bit Mac OS. The code is not
-very architecture dependent, so you should be able to compile and run on other
-Unix-like operating systems.
-
-Test
-----
-
-MiniLisp comes with a comprehensive test suite. In order to run the tests, give
-"test" argument to make.
-
-    $ make test
-
-The tests run twice, the second time with the environment variable
-`MINILISP_ALWAYS_GC=1`, which makes the garbage collector run at every memory
-allocation and makes the old heap inaccessible, so that any stale pointer
-crashes immediately. `MINILISP_DEBUG_GC=1` prints a line on the standard error
-output at each collection. The heap starts at 4 MB (per semi-space) and doubles
-when more than half of it is still in use after a collection, up to 1 GB.
-
-Size of the heap
-----------------
-
-The options `-m` (`--heap`) and `-M` (`--max-heap`) set the initial and the maximum
-size of the heap, in KB. The minimum is 32 KB, which is enough to start the
-interpreter and to load `examples/library.lisp`; a non tail recursion 1000 calls
-deep needs about 100 KB. This makes MiniLisp usable on small machines, such as a
-Raspberry Pi with little memory, and is a way to test the garbage collector with
-a tiny heap.
-
-    ./minilisp -m 256 -M 256 prog.lisp   # a heap of fixed size: 256 KB
-    ./minilisp -m 64 prog.lisp           # starts with 64 KB, may grow up to 1 GB
-    ./minilisp -M 1024 prog.lisp         # a heap of 1 MB at most (it starts with 1 MB)
-
-The collector copies the live objects from a semi-space to the other one, so the
-memory used is twice the size of the heap (and up to four times during a growth).
-A heap which cannot grow, because it has reached its maximum, ends with the error
-"Memory exhausted" when the live data do not fit anymore. `-m` alone does not limit the
-growth, `-M` does. If only `-M` is given, the heap starts at 4 MB or at the
-maximum if that is smaller.
 
 Language features
 -----------------
