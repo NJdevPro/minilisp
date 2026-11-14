@@ -112,6 +112,10 @@ Obj *alloc(void *root, int type, size_t size) {
     // boundary as the pointer.
     size = roundup(size, sizeof(void *));
 
+    // The size of an object is stored on 32 bits. This only matters with a heap larger than 4 GB.
+    if (size > UINT32_MAX)
+        error("Memory exhausted", filepos.line_num);
+
     // If the debug flag is on, run a GC at every allocation to force all the existing objects to
     // move to new addresses, and make the old heap inaccessible. By doing this the GC behavior
     // becomes more predictable and repeatable. If there's a memory bug that the C variable has a

@@ -354,6 +354,7 @@ static Obj *intern(void *root, const char *name) {
 
 // Reader marcro ' (single quote). It reads an expression and returns (quote <expr>).
 static Obj *read_quote(void *root) {
+    check_stack(filepos.line_num);
     DEFINE2(root, sym, tmp);
     *sym = intern(root, "quote");
     *tmp = read_expr(root);
@@ -362,14 +363,17 @@ static Obj *read_quote(void *root) {
     return *tmp;
 }
 
-static long long read_number(long long val) {
+// Reads the digits which follow the first one, val, of an integer. The magnitude of the smallest
+// integer is one more than the largest one: it is accepted if the integer is negative.
+static long long read_number(unsigned long long val, bool negative) {
+    const unsigned long long limit = (unsigned long long)LLONG_MAX + (negative ? 1 : 0);
     while (isdigit(peek())) {
-        int digit = read_char() - '0';
-        if (val > (LLONG_MAX - digit) / 10)
+        unsigned digit = (unsigned)(read_char() - '0');
+        if (val > (limit - digit) / 10)
             error("Integer too large", filepos.line_num);
         val = val * 10 + digit;
     }
-    return val;
+    return negative ? (long long)(0 - val) : (long long)val;
 }
 
 // If the number being read is a float (it has a fractional part, or an exponent), returns the
@@ -477,7 +481,7 @@ static Obj *read_expr(void *root) {
             size_t len = float_literal_len();
             if (len)
                 return read_float(root, (char)c, len);
-            return make_int(root, c == '-' ? -read_number(0) : read_number(c - '0'));
+            return make_int(root, c == '-' ? read_number(0, true) : read_number(c - '0', false));
         }
         if (isalpha(c) || is_symbol_char(c))
             return read_symbol(root, c);
@@ -490,6 +494,8 @@ static Obj *read_expr(void *root) {
 
 // Prints the given object.
 static void print(Obj *obj) {
+    // A list nested very deeply, or one which contains itself (see setcar), would overflow the stack
+    check_stack(obj->line_num);
     switch (obj->type) {
     case TCELL:
         fputc('(', stdout);
@@ -551,7 +557,6 @@ static void print(Obj *obj) {
     default:
         error("Bug: print: Unknown tag type: %d", obj->line_num, obj->type);
     }
-    //puts("");
 }
 
 // Returns the length of the given list. -1 if it's not a proper list.
@@ -700,6 +705,7 @@ static inline Obj *eval_simple(Obj **env, Obj *obj) {
     case TVECTOR:
     case TPRIMITIVE:
     case TFUNCTION:
+    case TMACRO:
     case TTRUE:
     case TSTRING:
     case TNIL:
@@ -1429,12 +1435,8 @@ static Obj *prim_eq(void *root, Obj **env, Obj **list) {
         return first->value == second->value ? True : Nil;
     if (first->type == TFLOAT && second->type == TFLOAT)
         return first->fvalue == second->fvalue ? True : Nil;
-    if (first->type == TSTRING){
-        if (second->type == TSTRING)
-            return strcmp(first->name, second->name) == 0 ? True : Nil;
-        else
-            error("The 2 arguments of eq must be of the same type", (*list)->line_num);
-    } 
+    if (first->type == TSTRING && second->type == TSTRING)
+        return strcmp(first->name, second->name) == 0 ? True : Nil;
     return first == second ? True : Nil;
 }
 

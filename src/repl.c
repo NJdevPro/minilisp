@@ -99,7 +99,7 @@ void minilisp(char *text, size_t length, bool with_repl, Obj **env, Obj **expr) 
                     puts("/memory to display the amount of memory used.");
                 }
                 else {
-                    printf("Unreconized command: %s", line);
+                    printf("Unrecognized command: %s", line);
                 }
                 putchar('\n');
             }

@@ -170,12 +170,27 @@ function check_io() {
   echo ok
 }
 
+# check_err NAME EXPECTED CODE: the last line written on the standard error must be EXPECTED
+# (Not run with MINILISP_ALWAYS_GC: building a very deep list would take forever.)
+function check_err() {
+  echo -n "Testing $1 ... "
+  result=$(./minilisp -r -H -x "$3" </dev/null 2>&1 >/dev/null | tail -1)
+  if [ "$result" != "$2" ]; then
+    echo FAILED
+    fail "$2 expected, but got $result"
+  fi
+  echo ok
+}
+
 # strings
 run 'string-concat' 'one & two and 3' '(string-concat "one" " & " "two" " and " 3)'
 run 'symbol->string' 'twelve' "
   (define twelve 12)
   (symbol->string 'twelve)"
 run 'string->symbol' 'twelve' '(string->symbol "twelve")'
+run 'eq string and nil' '()' '(eq "a" ())'
+run 'eq nil and string' '()' '(eq () "a")'
+run 'eq string and number' '()' '(eq "1" 1)'
 run 'substring' 'el' '(substring "hello" 1 3)'
 run 'substring to the end' 'llo' '(substring "hello" 2)'
 run 'substring empty' '' '(substring "hello" 5)'
@@ -390,6 +405,16 @@ run vector 398 '(define n 200) (define v (make-vector n 1)) (define i 0) (while 
 run vector '[(1 2) [3]]' "(vector '(1 2) [3])"
 
 # Size of the heap: -m is the initial size and -M the maximum, in KB.
+# Robustness: the inputs which used to crash the interpreter
+check_heap 'min integer' -9223372036854775808 '' '-9223372036854775808'
+check_heap 'max integer' 9223372036854775807 '' '9223372036854775807'
+check_heap 'integer too large' '[1]: Integer too large' '' '9223372036854775808'
+check_heap 'integer too small' '[1]: Integer too large' '' '-9223372036854775809'
+check_heap 'many quotes' '[1]: Stack overflow: the recursion is too deep' '' "$(printf "'%.0s" $(seq 100000))a"
+check_heap 'deeply nested parentheses' '[1]: Stack overflow: the recursion is too deep' '' "$(printf '(%.0s' $(seq 100000))"
+check_err 'print deep list' '[1]: Stack overflow: the recursion is too deep' '(define x ()) (define i 0) (while (< i 300000) (setq x (list x)) (setq i (+ i 1))) (print x)'
+check_err 'print cyclic list' '[1]: Stack overflow: the recursion is too deep' '(define x (list 1 2)) (setcar x x) (print x)'
+check_heap 'macro as the head of a form' 1 '' '(defmacro a () 1) (defmacro c () (list a)) (c)'
 check_heap 'heap fixed' 3 '-m 32 -M 32' '(length (list 1 2 3))'
 check_heap 'heap garbage' 50000 '-m 32 -M 32' '(define i 0) (while (< i 50000) (setq i (+ i 1))) i'
 check_heap 'heap exhausted' '[1]: Memory exhausted' '-m 32 -M 32' '(make-vector 5000 0)'
