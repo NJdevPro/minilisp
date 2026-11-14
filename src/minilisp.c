@@ -967,10 +967,10 @@ static Obj *reverse_copy(void *root, Obj **list) {
     return *head;
 }
 
-// (reverse ... | reverse <cell> | reverse <string>)
+// (reverse ... | reverse <cell> | reverse <string> | reverse <vector>)
 // The arguments are never modified: a new list or string is returned.
 static Obj *prim_reverse(void *root, Obj **env, Obj **list) {
-    DEFINE1(root, args);
+    DEFINE2(root, args, v);
     *args = eval_list(root, env, list);
     if (length(*args) != 1)
         return reverse(*args);  // The list of evaluated arguments is ours: reverse it in place
@@ -989,7 +989,14 @@ static Obj *prim_reverse(void *root, Obj **env, Obj **list) {
         r->name[len] = '\0';
         return r;
     }
-    error("When reverse has a single argument, it must be a list or a string",
+    if ((*args)->type == TVECTOR) {
+        *v = make_vector(root, (*args)->len, &Nil);
+        // Read the elements after make_vector, which may have moved the vector
+        for (long long i = 0, n = (*v)->len; i < n; i++)
+            (*v)->elems[i] = (*args)->elems[n - 1 - i];
+        return *v;
+    }
+    error("When reverse has a single argument, it must be a list, a string or a vector",
           (*list)->line_num);
 }
 
@@ -1133,6 +1140,7 @@ static Obj *prim_exp(void *root, Obj **env, Obj **list)  { return math1(root, en
 static Obj *prim_log(void *root, Obj **env, Obj **list)  { return math1(root, env, list, "log", log); }
 static Obj *prim_sin(void *root, Obj **env, Obj **list)  { return math1(root, env, list, "sin", sin); }
 static Obj *prim_cos(void *root, Obj **env, Obj **list)  { return math1(root, env, list, "cos", cos); }
+static Obj *prim_tan(void *root, Obj **env, Obj **list)  { return math1(root, env, list, "tan", tan); }
 static Obj *prim_atan(void *root, Obj **env, Obj **list) { return math1(root, env, list, "atan", atan); }
 
 // (expt <number> <number>) returns the first number raised to the power of the second one
@@ -1870,6 +1878,7 @@ static void define_primitives(void *root, Obj **env) {
     add_primitive(root, env, "log", prim_log);
     add_primitive(root, env, "sin", prim_sin);
     add_primitive(root, env, "cos", prim_cos);
+    add_primitive(root, env, "tan", prim_tan);
     add_primitive(root, env, "atan", prim_atan);
     add_primitive(root, env, "expt", prim_expt);
     add_primitive(root, env, "float?", prim_float_p);

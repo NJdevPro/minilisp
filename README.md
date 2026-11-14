@@ -232,9 +232,8 @@ car.
     (setcar cell 'x)
     cell  ; -> (x . b)
 
-`length` and `reverse` operate either on their arguments, or a single list or a string
-(`length` also accepts a vector).
-`reverse` never modifies its arguments: it returns a new list or a new string.
+`length` and `reverse` operate either on their arguments, or a single list, string or vector.
+`reverse` never modifies its arguments: it returns a new list, string or vector.
 
     (length '(1 2 3))   ; -> 3
     (length 1 2 t)      ; -> 3
@@ -243,6 +242,7 @@ car.
     (reverse '(a b c))  ; -> (c b a)
     (reverse 1 2 3)     ; -> (3 2 1)
     (reverse "1234")    ; -> "4321" 
+    (reverse [1 2 3])   ; -> [3 2 1]
     (reverse '((a) b "c"))  ; -> (c b (a))
 
 ### Numeric operators
