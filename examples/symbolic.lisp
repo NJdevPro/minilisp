@@ -4,7 +4,7 @@
 ;;  Works on formulas of one variable, written as Lisp lists:
 ;;
 ;;      (+ a b ...)  (- a b ...)  (* a b ...)  (/ a b)  (expt a n)  (sqrt a)
-;;      (sin a) (cos a) (tan a) (exp a) (log a)
+;;      (sin a) (cos a) (tan a) (atan a) (exp a) (log a)
 ;;
 ;;  Numbers are integers, floats, or exact fractions written (/ n d). Any symbol
 ;;  other than the variable is a constant, and pi is 3.14159...
@@ -122,7 +122,7 @@
 ;;; ------------------------------------------------------------------
 
 ;; The symbols are ordered by their position here, the unknown ones being added at the end
-(define sym-table '(x y z a b c n pi + * expt sin cos tan exp log))
+(define sym-table '(x y z a b c n pi + * expt sin cos tan exp log atan))
 
 (defun index-in (lst s i)
   (if (eq lst ())
@@ -248,7 +248,9 @@
               (if (any powers (lambda (f) (or (num? f) (op? f '*))))
                   ;; Some powers became numbers or products: gather again
                   (simp-prod (cons c powers))
-                  (if (one? c) (mk-prod powers) (cons '* (cons c powers))))))))))
+                  (if (eq powers ())
+                      c
+                      (if (one? c) (mk-prod powers) (cons '* (cons c powers)))))))))))
 
 ;; b to the power n, both simplified
 (defun simp-pow (b n)
@@ -267,25 +269,28 @@
 
 ;; A function of a simplified formula
 (defun simp-fn (op a)
-  (if (not (memq op '(sin cos tan exp log)))
+  (if (not (memq op '(sin cos tan exp log atan)))
       (error "Unknown function " (symbol->string op))
       (if (float? a)
           (apply-fn op a)
           (if (and (eq op 'sin) (zero? a)) 0
             (if (and (eq op 'cos) (zero? a)) 1
               (if (and (eq op 'tan) (zero? a)) 0
+                (if (and (eq op 'atan) (zero? a)) 0
+                (if (and (eq op 'atan) (one? a)) (simp-prod (list '(/ 1 4) 'pi))
                 (if (and (eq op 'exp) (zero? a)) 1
                   (if (and (eq op 'log) (one? a)) 0
                     (if (and (eq op 'exp) (op? a 'log)) (cadr a)
                       (if (and (eq op 'log) (op? a 'exp)) (cadr a)
-                          (list op a)))))))))))
+                          (list op a)))))))))))))
 
 (defun apply-fn (op x)
   (if (eq op 'sin) (sin x)
     (if (eq op 'cos) (cos x)
       (if (eq op 'tan) (/ (sin x) (cos x))
-        (if (eq op 'exp) (exp x)
-            (log x))))))
+        (if (eq op 'atan) (atan x)
+          (if (eq op 'exp) (exp x)
+              (log x)))))))
 
 (defun simplify (e)
   (if (ratio? e)
@@ -359,9 +364,10 @@
   (if (eq op 'sin) (list '* (list 'cos u) du)
     (if (eq op 'cos) (list '* -1 (list 'sin u) du)
       (if (eq op 'tan) (list '* (list '+ 1 (list 'expt (list 'tan u) 2)) du)
-        (if (eq op 'exp) (list '* (list 'exp u) du)
-          (if (eq op 'log) (list '* (list 'expt u -1) du)
-              (error "Cannot differentiate the function " (symbol->string op))))))))
+        (if (eq op 'atan) (list '* (list 'expt (list '+ 1 (list 'expt u 2)) -1) du)
+          (if (eq op 'exp) (list '* (list 'exp u) du)
+            (if (eq op 'log) (list '* (list 'expt u -1) du)
+                (error "Cannot differentiate the function " (symbol->string op)))))))))
 
 ;; The derivative of a simplified formula, in any shape
 (defun deriv (e v)
@@ -426,7 +432,7 @@
                   (if (eq op '/) (reduce (lambda (a b) (/ a b)) (cdr xs) (car xs))
                     (if (eq op 'expt) (expt (car xs) (cadr xs))
                       (if (eq op 'sqrt) (sqrt (car xs))
-                          (if (memq op '(sin cos tan exp log))
+                          (if (memq op '(sin cos tan atan exp log))
                               (apply-fn op (car xs))
                               (error "Unknown function " (symbol->string op))))))))))))))
 
@@ -525,6 +531,8 @@
 (try "d/dx" '(exp (* 2 x)) (diff '(exp (* 2 x)) 'x))
 (try "d/dx" '(log (cos x)) (diff '(log (cos x)) 'x))
 (try "d/dx" '(tan x) (diff '(tan x) 'x))
+(try "d/dx" '(atan x) (diff '(atan x) 'x))
+(try "d/dx" '(atan (* 2 x)) (diff '(atan (* 2 x)) 'x))
 (try "d/dx" '(sqrt (+ 1 (expt x 2))) (diff '(sqrt (+ 1 (expt x 2))) 'x))
 (try "d/dx" '(expt x x) (diff '(expt x x) 'x))
 (try "d3/dx3" '(sin (* 2 x)) (diff (diff (diff '(sin (* 2 x)) 'x) 'x) 'x))
@@ -534,6 +542,7 @@
 (try "taylor (around 0, degree 7)" '(sin x) (taylor '(sin x) 'x 0 7))
 (try "taylor (around 0, degree 6)" '(cos x) (taylor '(cos x) 'x 0 6))
 (try "taylor (around 0, degree 7)" '(tan x) (taylor '(tan x) 'x 0 7))
+(try "taylor (around 0, degree 7)" '(atan x) (taylor '(atan x) 'x 0 7))
 (try "taylor (around 0, degree 5)" '(log (+ 1 x)) (taylor '(log (+ 1 x)) 'x 0 5))
 (try "taylor (around 0, degree 5)" '(/ 1 (- 1 x)) (taylor '(/ 1 (- 1 x)) 'x 0 5))
 (try "taylor (around 0, degree 4)" '(sqrt (+ 1 x)) (taylor '(sqrt (+ 1 x)) 'x 0 4))
@@ -543,6 +552,7 @@
 (println "(sin (/ pi 6)) =" (evaluate '(sin (/ pi 6)) 'x 0))
 (println "(+ (expt x 2) 1) for x = 3:" (evaluate '(+ (expt x 2) 1) 'x 3))
 (println "sin(x) for x = 0.5:" (evaluate '(sin x) 'x 0.5))
+(println "4 * atan(1) =" (evaluate '(* 4 (atan x)) 'x 1))
 (println "the Taylor polynomial of degree 7:" (evaluate (taylor '(sin x) 'x 0 7) 'x 0.5))
 (println "the difference:"
          (abs (- (evaluate '(sin x) 'x 0.5) (evaluate (taylor '(sin x) 'x 0 7) 'x 0.5))))
