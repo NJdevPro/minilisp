@@ -13,6 +13,7 @@
 #include <setjmp.h>
 #include <string.h>
 #include <sys/resource.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #include "minilisp.h"
 #include "gc.h"
@@ -1677,13 +1678,10 @@ static Obj *file_args(void *root, Obj **env, Obj **list, const char *name, int a
     return args;
 }
 
-// (read-file name) is the content of the file, as a string
-static Obj *prim_read_file(void *root, Obj **env, Obj **list) {
-    Obj *args = file_args(root, env, list, "read-file", 1);
-    const char *name = args->car->name;
-    FILE *f = fopen(name, "rb");
-    if (!f)
-        error("read-file: cannot open %s: %s", (*list)->line_num, name, strerror(errno));
+// Reads a stream until its end and returns the content in a malloc'ed buffer, ended by a null
+// character, which the caller must free. It returns NULL if the memory is exhausted or if the
+// reading fails. The stream is not closed.
+static char *slurp(FILE *f) {
     char *buf = NULL;
     size_t len = 0, cap = 0;
     for (;;) {
@@ -1692,8 +1690,7 @@ static Obj *prim_read_file(void *root, Obj **env, Obj **list) {
             char *nbuf = realloc(buf, cap);
             if (!nbuf) {
                 free(buf);
-                fclose(f);
-                error("read-file: out of memory", (*list)->line_num);
+                return NULL;
             }
             buf = nbuf;
         }
@@ -1702,13 +1699,25 @@ static Obj *prim_read_file(void *root, Obj **env, Obj **list) {
             break;
         len += n;
     }
-    bool failed = ferror(f);
-    fclose(f);
-    if (failed) {
+    if (ferror(f)) {
         free(buf);
-        error("read-file: cannot read %s", (*list)->line_num, name);
+        return NULL;
     }
     buf[len] = '\0';
+    return buf;
+}
+
+// (read-file name) is the content of the file, as a string
+static Obj *prim_read_file(void *root, Obj **env, Obj **list) {
+    Obj *args = file_args(root, env, list, "read-file", 1);
+    const char *name = args->car->name;
+    FILE *f = fopen(name, "rb");
+    if (!f)
+        error("read-file: cannot open %s: %s", (*list)->line_num, name, strerror(errno));
+    char *buf = slurp(f);
+    fclose(f);
+    if (!buf)
+        error("read-file: cannot read %s", (*list)->line_num, name);
     // The content is copied into the heap: the string stops at the first null character.
     // alloc may run the GC, but it does not affect the buffer
     Obj *result = make_string(root, buf);
@@ -1746,6 +1755,61 @@ static Obj *prim_append_file(void *root, Obj **env, Obj **list) {
 static Obj *prim_file_exists(void *root, Obj **env, Obj **list) {
     Obj *args = file_args(root, env, list, "file-exists?", 1);
     return access(args->car->name, F_OK) == 0 ? True : Nil;
+}
+
+// Converts the status given by wait into the exit code of the command: the exit status, or
+// 128 plus the number of the signal if the command was killed, as the shell does.
+static long long exit_code(int status) {
+    if (WIFEXITED(status))
+        return WEXITSTATUS(status);
+    if (WIFSIGNALED(status))
+        return 128 + WTERMSIG(status);
+    return -1;
+}
+
+// Evaluates the argument of system and system-output, which is the command
+static Obj *command_arg(void *root, Obj **env, Obj **list, const char *name) {
+    Obj *args = eval_list(root, env, list);
+    if (length(args) != 1 || args->car->type != TSTRING)
+        error("%s takes a command, which is a string", (*list)->line_num, name);
+    return args;
+}
+
+// (system command) runs the command with the shell (sh -c), and waits for its end. The command
+// uses the standard input, output and error of the interpreter. It returns the exit code of the
+// command (0 means success).
+static Obj *prim_system(void *root, Obj **env, Obj **list) {
+    Obj *args = command_arg(root, env, list, "system");
+    fflush(stdout);   // so that the output of the command comes after what was already printed
+    fflush(stderr);
+    int status = system(args->car->name);
+    if (status == -1)
+        error("system: cannot run the command: %s", (*list)->line_num, strerror(errno));
+    return make_int(root, exit_code(status));
+}
+
+// (system-output command) is like system, but it returns what the command writes on its standard
+// output, as a string, instead of its exit code. The error output is not captured. It is an error
+// if the command fails.
+static Obj *prim_system_output(void *root, Obj **env, Obj **list) {
+    Obj *args = command_arg(root, env, list, "system-output");
+    fflush(stdout);
+    fflush(stderr);
+    FILE *f = popen(args->car->name, "r");
+    if (!f)
+        error("system-output: cannot run the command: %s", (*list)->line_num, strerror(errno));
+    char *buf = slurp(f);
+    int status = pclose(f);
+    if (!buf)
+        error("system-output: cannot read the output of the command", (*list)->line_num);
+    long long code = status == -1 ? -1 : exit_code(status);
+    if (code != 0) {
+        free(buf);
+        error("system-output: the command failed with code %lld", (*list)->line_num, code);
+    }
+    Obj *result = make_string(root, buf);
+    free(buf);
+    return result;
 }
 
 static Obj *prim_exit(void *root, Obj **env, Obj **list) {
@@ -1906,6 +1970,8 @@ static void define_primitives(void *root, Obj **env) {
     add_primitive(root, env, "write-file", prim_write_file);
     add_primitive(root, env, "append-file", prim_append_file);
     add_primitive(root, env, "file-exists?", prim_file_exists);
+    add_primitive(root, env, "system", prim_system);
+    add_primitive(root, env, "system-output", prim_system_output);
 }
 
 //======================================================================

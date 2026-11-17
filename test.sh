@@ -264,6 +264,21 @@ check_io 'read-file missing' '[1]: read-file: cannot open /nonexistent/file: No 
 check_io 'write-file bad dir' '[1]: write-file: cannot open /nonexistent/file: No such file or directory' '' '(write-file "/nonexistent/file" "x")'
 check_io 'read-file bad argument' '[1]: read-file takes a file name' '' '(read-file 1)'
 check_io 'write-file bad argument' '[1]: write-file takes a file name and a string' '' '(write-file "f")'
+check_io 'system exit code' 0 '' '(system "true")'
+check_io 'system failure code' 3 '' '(system "exit 3")'
+check_io 'system signal' 143 '' '(system "kill -TERM $$")'
+echo -n "Testing system output order ... "
+result=$(./minilisp -r -H -x '(progn (print "before") (system "echo after"))' 2>&1 | sed 's/Command history disengaged.//' | head -1)
+[ "$result" = "beforeafter" ] || { echo FAILED; fail "beforeafter expected, but got $result"; }
+echo ok
+check_io 'system stdin' 0 'abc\n' '(system "read x; test \"$x\" = abc")'
+check_io 'system-output' 'hello' '' '(system-output "echo hello | tr -d \"\\n\"")'
+check_io 'system-output length' 6 '' '(length (system-output "echo hello"))'
+check_io 'system-output empty' 0 '' '(length (system-output "true"))'
+check_io 'system-output large' 200000 '' '(length (system-output "head -c 200000 /dev/zero | tr \"\\0\" x"))'
+check_io 'system-output failure' '[1]: system-output: the command failed with code 2' '' '(system-output "exit 2")'
+check_io 'system-output text' 'b' '' '(substring (system-output "printf \"a\\nb\\n\"") 2 3)'
+check_io 'system bad argument' '[1]: system takes a command, which is a string' '' '(system 1)'
 
 # Lexical closures
 run closure 3 '(defun call (f) ((lambda (var) (f)) 5))

@@ -20,13 +20,13 @@ The original MiniLisp included the following:
 The added primitives of this version:
 - cons, car, cdr
 - strings, substrings, string comparisons and conversions
-- floats and operators on floats
+- floats, operators on floats and math functions
 - vectors
 - operators *, /, mod
 - predicates >, >=, <=,
 - special forms and, or, not,
 - functions list, atom, length, reverse, progn, print, println, load, exit, gensym
-- input and output: read-line, read-file, write-file, append-file, file-exists?, args
+- input and output: read-line, read-file, write-file, append-file, file-exists?, args, system, system-output
 - tail call optimization
 
 This added expressivity has the side effect of being much faster as well, since all these primitives are compiled C instead of being interpreted.
@@ -535,6 +535,19 @@ the current directory (unlike `load`).
 
 Strings stop at the first null character, so a file which contains one is read
 up to it.
+
+`system` runs a command with the shell (`sh -c`) and waits for its end. The
+command uses the input and output of the interpreter, and `system` returns its
+exit code (0 means success; a command killed by a signal gives 128 plus the
+signal number). `system-output` runs a command too, but it returns what the
+command writes on its standard output, as a string. It is an error if the
+command fails.
+
+    (system "ls -l")                    ; -> 0
+    (system-output "date +%Y")          ; -> "2026\n"
+
+The command is passed to the shell as is: when it includes text coming from the
+user or from a file, make sure it cannot be interpreted as shell syntax.
 
 `args` returns the list of the arguments of the command line which follow `--`,
 as strings. It is `()` when there are none.
