@@ -1141,6 +1141,8 @@ static Obj *prim_log(void *root, Obj **env, Obj **list)  { return math1(root, en
 static Obj *prim_sin(void *root, Obj **env, Obj **list)  { return math1(root, env, list, "sin", sin); }
 static Obj *prim_cos(void *root, Obj **env, Obj **list)  { return math1(root, env, list, "cos", cos); }
 static Obj *prim_tan(void *root, Obj **env, Obj **list)  { return math1(root, env, list, "tan", tan); }
+static Obj *prim_asin(void *root, Obj **env, Obj **list) { return math1(root, env, list, "asin", asin); }
+static Obj *prim_acos(void *root, Obj **env, Obj **list) { return math1(root, env, list, "acos", acos); }
 static Obj *prim_atan(void *root, Obj **env, Obj **list) { return math1(root, env, list, "atan", atan); }
 
 // (expt <number> <number>) returns the first number raised to the power of the second one
@@ -1879,6 +1881,8 @@ static void define_primitives(void *root, Obj **env) {
     add_primitive(root, env, "sin", prim_sin);
     add_primitive(root, env, "cos", prim_cos);
     add_primitive(root, env, "tan", prim_tan);
+    add_primitive(root, env, "asin", prim_asin);
+    add_primitive(root, env, "acos", prim_acos);
     add_primitive(root, env, "atan", prim_atan);
     add_primitive(root, env, "expt", prim_expt);
     add_primitive(root, env, "float?", prim_float_p);
